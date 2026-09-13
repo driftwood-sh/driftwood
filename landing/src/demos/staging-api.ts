@@ -87,6 +87,41 @@ async function post(path: string, init?: RequestInit): Promise<Outcome> {
   }
 }
 
+/* A POST whose body the caller reads. Same contract as post(): a 404 is
+   `missing`, which the page reports beside the control instead of as a
+   failure. A body that will not parse is not a failure either, because the
+   status already answered. */
+async function postJson<T>(
+  path: string,
+  body?: unknown,
+): Promise<Outcome & { result?: T }> {
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      ...(body === undefined
+        ? {}
+        : {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+    });
+    if (!response.ok)
+      return {
+        ok: false,
+        missing: response.status === 404 || response.status === 405,
+        message: await errorDetail(response, FALLBACK),
+      };
+    try {
+      return { ok: true, result: (await response.json()) as T };
+    } catch {
+      return { ok: true };
+    }
+  } catch {
+    return { ok: false, missing: false, message: FALLBACK };
+  }
+}
+
 export const REVIEW_CHUNK = 100;
 export const SEND_CHUNK = 100;
 /* Same ceiling the review queue uses: pages fetched per list, at most. */
@@ -175,33 +210,51 @@ export type MoveResult = { displaced?: DisplacedRow[] };
 export const queueAction = (sendId: string, action: QueueAction) =>
   post(`/api/v1/dashboard/sends/${encodeURIComponent(sendId)}/${ACTION_PATH[action]}`);
 
-/* Same call, but the body comes back: Move to top needs it for the toast. */
-export async function moveToTop(sendId: string): Promise<Outcome & { result?: MoveResult }> {
-  try {
-    const response = await fetch(
-      `/api/v1/dashboard/sends/${encodeURIComponent(sendId)}/send-next`,
-      { method: "POST", credentials: "include" },
-    );
-    if (!response.ok)
-      return {
-        ok: false,
-        missing: response.status === 404 || response.status === 405,
-        message: await errorDetail(response, FALLBACK),
-      };
-    let result: MoveResult = {};
-    try {
-      result = (await response.json()) as MoveResult;
-    } catch {
-      /* An empty body is a fine answer; the toast falls back. */
-    }
-    return { ok: true, result };
-  } catch {
-    return { ok: false, missing: false, message: FALLBACK };
-  }
-}
+/* Same call, but the body comes back: Move to top needs it for the toast.
+   An empty body is a fine answer; the toast falls back. */
+export const moveToTop = (sendId: string) =>
+  postJson<MoveResult>(
+    `/api/v1/dashboard/sends/${encodeURIComponent(sendId)}/send-next`,
+  );
 
 export const holdAllSends = () => post("/api/v1/dashboard/sends/hold-all");
 export const resumeAllSends = () => post("/api/v1/dashboard/sends/resume-all");
+
+/* ---------- approving a demo ---------- */
+
+/* Approve means "this demo is good, send it to the right people at this
+   company". It is pressed before anyone has been found, so it names a demo
+   and never a person, and a name the customer adds themselves rides along as
+   contact_hint on the same call. */
+
+export type ApproveResult = {
+  demo_key: string;
+  status: string;
+  approved_at: string;
+  already_approved: boolean;
+  agent_woken: boolean;
+};
+
+export type BulkApproveResult = {
+  accepted: number;
+  accepted_keys: string[];
+  rejected: { demo_key: string; reason: string; code: string }[];
+  agent_woken: boolean;
+};
+
+/* The key can be `html:<32 hex>`, so it is encoded into the path. */
+export const approveDemo = (demoKey: string, contactHint?: string) =>
+  postJson<ApproveResult>(
+    `/api/v1/dashboard/demos/${encodeURIComponent(demoKey)}/approve`,
+    contactHint ? { contact_hint: contactHint } : {},
+  );
+
+/* Every demo in one press. There is no cap: a workspace with sixty demos and
+   no email on any of them approves all sixty at once. */
+export const approveDemos = (demoKeys: string[]) =>
+  postJson<BulkApproveResult>("/api/v1/dashboard/demos/approve", {
+    demo_keys: demoKeys,
+  });
 
 /* ---------- the accounts a demo can go out from ---------- */
 

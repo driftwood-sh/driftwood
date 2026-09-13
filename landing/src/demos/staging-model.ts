@@ -146,7 +146,89 @@ export type LibraryDemo = {
   content_url: string;
   created_at: string;
   updated_at: string;
+  /* What the customer decided about this demo. Absent on a demo nobody has
+     approved, and absent altogether on a backend that does not serve the
+     field yet, which is why every read of it goes through approvalState. */
+  approval?: DemoApproval | null;
 };
+
+/* ---------- approval ---------- */
+
+/* A customer approves a demo before anyone has been found to send it to:
+   "this one is good, send it to the right people at this company". The five
+   statuses the row can carry read as four states here, because the difference
+   inside two of those pairs is ours, not the customer's. */
+export type ApprovalStatus =
+  | "queued"
+  | "handed_to_agent"
+  | "no_contacts_found"
+  | "contacts_found"
+  | "blocked";
+
+export const APPROVAL_STATUSES: ApprovalStatus[] = [
+  "queued",
+  "handed_to_agent",
+  "no_contacts_found",
+  "contacts_found",
+  "blocked",
+];
+
+export type DemoApproval = {
+  status: ApprovalStatus;
+  approved_at: string;
+  /* Why nobody was found, or what is in the way. */
+  note: string | null;
+};
+
+/* The status a write answered with. Read defensively: it arrives as a plain
+   string, and a status this build has never heard of still means the demo is
+   approved, so it must not paint the card as un-approved. */
+export function readApprovalStatus(value: unknown): ApprovalStatus {
+  return APPROVAL_STATUSES.includes(value as ApprovalStatus)
+    ? (value as ApprovalStatus)
+    : "queued";
+}
+
+/* "none" — nobody approved it, so the card offers Approve.
+   "waiting" — approved, and nobody to send it to yet.
+   "nobody" — approved, and nobody was found.
+   "filed" — the sends are written, so the demo belongs to a real day of the
+   queue rather than the group above them. */
+export type ApprovalState = "none" | "waiting" | "nobody" | "filed";
+
+export function approvalState(
+  row: { approval?: DemoApproval | null } | null,
+): ApprovalState {
+  const status = row?.approval?.status;
+  if (status === "queued" || status === "handed_to_agent") return "waiting";
+  if (status === "no_contacts_found" || status === "blocked") return "nobody";
+  if (status === "contacts_found") return "filed";
+  return "none";
+}
+
+/* An approved demo with nobody to send it to yet is no longer staged: it sits
+   at the top of the Queue instead. Before this it was in neither segment. */
+export function awaitsPeople(row: LibraryDemo): boolean {
+  const state = approvalState(row);
+  return state === "waiting" || state === "nobody";
+}
+
+/* What an Approve press can act on: a demo with no email of its own that
+   nobody has approved yet. A demo that already has an email has a review item
+   behind it, and deciding that item is the other path. */
+export function isApprovable(demo: StagedDemo): boolean {
+  return demo.library !== null && approvalState(demo.library) === "none";
+}
+
+export function approvableDemos(demos: StagedDemo[]): StagedDemo[] {
+  return demos.filter(isApprovable);
+}
+
+/* The key the approve endpoints name: the library row's own id. It can be
+   `html:<hex>`, so every caller encodes it into the path. */
+export function approveKeyOf(demo: StagedDemo): string | null {
+  return demo.library?.demo_id ?? null;
+}
 
 /* "Dana Whitfield, Meridian" from a library row, which carries the two names
    as plain text rather than as a lead. */
@@ -190,6 +272,9 @@ export function stagedFromLibrary(row: LibraryDemo): StagedDemo {
    review item wins it, because that copy has the email on it. The pair is
    recognised by the lead it is for, or by the demo's own slug.
 
+   A demo the customer already approved is not staged either: it has left for
+   the top of the Queue, where it waits for people.
+
    Newest first, across both sources: the work done today is the work a
    customer opens the page to see. */
 export function stagedWithLibrary(
@@ -209,7 +294,12 @@ export function stagedWithLibrary(
     if (send.attachment_slug) slugs.add(send.attachment_slug);
   }
   const rest = library
-    .filter((row) => !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name))
+    .filter(
+      (row) =>
+        !awaitsPeople(row) &&
+        !(row.lead_id !== null && leads.has(row.lead_id)) &&
+        !slugs.has(row.name),
+    )
     .map(stagedFromLibrary);
   return [...staged, ...rest].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -517,6 +607,9 @@ export const EMPTY_STAGING = "Nothing waiting for you.";
 export const EMPTY_QUEUE = "Nothing queued yet.";
 export const EMPTY_SENT = "Nothing sent yet.";
 export const NOT_AVAILABLE = "Not available yet.";
+/* The one action on a demo nobody was found for, and the field it opens. */
+export const ADD_A_NAME = "Add a name";
+export const ADD_A_NAME_LABEL = "Who should get this?";
 
 /* ---------- the queue, by day ---------- */
 
@@ -619,6 +712,58 @@ export function groupQueueByDay(
         full: capped.length > 0 && capped.every((load) => load.used >= (load.cap ?? 0)),
       };
     });
+}
+
+/* ---------- the queue, above the days ---------- */
+
+/* One approved demo that has nobody to send it to yet. */
+export type ApprovedRow = {
+  /* The library row's own id, which is what the approve endpoints name. */
+  demoKey: string;
+  company: string;
+  approvedAt: string;
+  /* The line this demo carries when nobody was found, and null while there
+     are still people to come. */
+  nobodyLine: string | null;
+};
+
+/* The one line a demo shows when nobody was found. The backend's own note
+   wins when it wrote one, because it says which wall this demo hit. */
+export function nobodyFoundLine(row: LibraryDemo): string {
+  const note = row.approval?.note?.trim();
+  return note ? note : `No one found at ${row.company_name}.`;
+}
+
+/* The group above the queue's days, in the customer's own words. */
+export const APPROVED_GROUP = "Approved, not scheduled yet";
+
+/* That group's rows: every demo the customer approved that has nobody to send
+   it to yet, newest approval first. A demo leaves the group once its sends
+   exist, and then it appears under the day it goes out on. */
+export function approvedNotScheduled(library: LibraryDemo[]): ApprovedRow[] {
+  return library
+    .filter(awaitsPeople)
+    .map((row) => ({
+      demoKey: row.demo_id,
+      company: row.company_name,
+      /* A stamp the backend left empty would sort every row to the bottom and
+         read as no date at all, so the demo's own day stands in. */
+      approvedAt: row.approval?.approved_at || row.created_at,
+      nobodyLine: approvalState(row) === "nobody" ? nobodyFoundLine(row) : null,
+    }))
+    .sort((a, b) => b.approvedAt.localeCompare(a.approvedAt));
+}
+
+/* When the customer approved it: "Today", "Yesterday", then the date. */
+export function approvedLabel(iso: string, today: Date = new Date()): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const day = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  const days = Math.round((start.getTime() - day.getTime()) / 86400e3);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return at.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /* How many more demos the day can take. Null when the workspace exposes no
