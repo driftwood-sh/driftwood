@@ -11,7 +11,7 @@
    - the 16:9 box is reserved from first paint, the real ratio replaces it in
      one step, and the swap moves nothing (ux-principles rule 17)
 
-   Run the dev server on 5191 first: npm run dev -- --port 5191 */
+   Run the dev server on 5191 first: npm run dev:qa */
 import { chromium, webkit, devices } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -24,6 +24,9 @@ const PORTRAIT='Kitebar';                            // demo-portrait.mp4, 540x9
 const PORTRAIT_EMAIL='Priya Patel, Northstar';       // compare.mp4, 968x1182, with email
 const LANDSCAPE='Yuvan Kumar, Autosana';             // case-autosana.mp4, 1920x1080, with email
 const LANDSCAPE_BARE='Example lead, Sample company';  // case-autosana.mp4, 1920x1080, no email
+// The one file the reserved-box pass holds back, so it is the only frame that
+// has not settled while that pass takes its first measurements.
+const HELD_FILE='demo-portrait.mp4';
 
 const round=(n)=>Math.round(n*100)/100;
 // A derived height lands a hundredth off the arithmetic, so compare to the pixel.
@@ -52,11 +55,22 @@ const measure=(page,label)=>page.evaluate((name)=>{
  };
 },label);
 
-// Every clip on the page has reported its size, so the frames have settled.
-const clipsSettled=(page)=>page.waitForFunction(()=>{
- const clips=[...document.querySelectorAll('.dp-card video')];
- return clips.length>0 && clips.every((v)=>v.readyState>0||v.error);
-});
+/* Every clip and every image on a card has reported, so the cards have settled.
+   Measure only after this resolves.
+
+   Both kinds of media move a card. A clip that has not reported yet still owes
+   its frame a ratio and a duration badge. One fixture email embeds an image
+   from driftwood.sh, and that image reserves no space until it arrives, so the
+   card it sits on is one height before the request finishes and another after.
+   An image that failed reports complete as well, so this returns either way.
+
+   heldFile names a clip a pass keeps behind a gate of its own. Waiting on that
+   one would never return, so it is left out. */
+const clipsSettled=(page,heldFile='')=>page.waitForFunction((file)=>{
+ const clips=[...document.querySelectorAll('.dp-card video')].filter((v)=>!(file&&v.src.includes(file)));
+ const images=[...document.querySelectorAll('.dp-card img')];
+ return clips.length>0 && clips.every((v)=>v.readyState>0||v.error) && images.every((i)=>i.complete);
+},heldFile);
 
 /* Layout shift, recorded with the element each shift is attributed to. Only
    Chromium reports these entries; WebKit reads back null. */
@@ -74,6 +88,54 @@ const recordShifts=(page)=>page.addInitScript(()=>{
  } catch {
   window.__shifts=null;
  }
+});
+
+/* Every size each clip frame took, keyed by the card it belongs to, from the
+   moment the frame node appeared.
+
+   A ResizeObserver alone cannot record this. It is attached after navigation,
+   and it reports through a callback that waits for a rendering frame. The
+   clip's metadata usually lands inside that gap, so the one coalesced entry
+   already reports the portrait size and the reserved 16:9 box goes unrecorded
+   — even though it was on the page the whole time. The same gap at the other
+   end loses the portrait size instead, when the read comes before the frame.
+
+   So the recorder is an init script, and a MutationObserver drives it. The
+   observer runs before any page script, catches each frame node as it enters
+   the document, and reads the size it entered at. It then reads the size again
+   on every class or style change, which are the two attributes the card
+   rewrites when the real ratio arrives. A MutationObserver reports in the
+   microtask after the render that changed the DOM, so no rendering frame has
+   to happen first. A paint cannot fall between those two writes either: the
+   card makes both in one render.
+
+   A ResizeObserver still runs beside it, for a size that changes with no
+   attribute behind it. Both feed the same list, which keeps only changes. */
+const recordFrames=(page)=>page.addInitScript(()=>{
+ window.__frames={};
+ const watched=new WeakSet();
+ const record=(shell)=>{
+  const name=shell.closest('.dp-card')?.getAttribute('aria-label');
+  if (!name) return;
+  const r=shell.getBoundingClientRect();
+  const size=`${Math.round(r.width*100)/100}x${Math.round(r.height*100)/100}`;
+  const seen=window.__frames[name]??(window.__frames[name]=[]);
+  if (seen.at(-1)!==size) seen.push(size);
+ };
+ const sizes=new ResizeObserver((entries)=>{for (const entry of entries) record(entry.target);});
+ const scan=()=>{
+  for (const shell of document.querySelectorAll('.dp-video-shell')) {
+   if (watched.has(shell)) continue;
+   watched.add(shell);
+   record(shell);
+   sizes.observe(shell);
+  }
+ };
+ new MutationObserver((changes)=>{
+  scan();
+  for (const change of changes) if (watched.has(change.target)) record(change.target);
+ }).observe(document,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});
+ scan();
 });
 
 async function pass(page,width){
@@ -161,22 +223,14 @@ async function reservedThenSwapped(page){
  const errors=[];page.on('pageerror',(e)=>errors.push(e.message));
  let release;
  const gate=new Promise((resolve)=>{release=resolve;});
- await page.route('**/demo-portrait.mp4',async (route)=>{await gate;await route.continue();});
+ // The recorder goes in before navigation, so the frame is watched from its
+ // first paint rather than from whenever this script gets to it.
+ await recordFrames(page);
+ await page.route(`**/${HELD_FILE}`,async (route)=>{await gate;await route.continue();});
  await page.goto(`${base}/dashboard/demos?mock=1`);
  const card=page.locator(`.dp-card[aria-label="${PORTRAIT}"]`);
  await card.waitFor();
- // Watch the frame from before the bytes land. ResizeObserver reports the size
- // it starts on, so every later entry is a change.
- await card.locator('.dp-video-shell').evaluate((shell)=>{
-  window.__frames=[];
-  new ResizeObserver((entries)=>{
-   for (const entry of entries) {
-    const r=entry.target.getBoundingClientRect();
-    const size=`${Math.round(r.width*100)/100}x${Math.round(r.height*100)/100}`;
-    if (window.__frames.at(-1)!==size) window.__frames.push(size);
-   }
-  }).observe(shell);
- });
+ await clipsSettled(page,HELD_FILE);
  const held=await measure(page,PORTRAIT);
  const heldLandscape=await measure(page,LANDSCAPE);
  // Space is reserved, not zero: the 16:9 box, which is also where a landscape
@@ -192,10 +246,13 @@ async function reservedThenSwapped(page){
  assert.equal(swapped.frame.w,225);
  assert.equal(swapped.frame.h,400);
  // One step: the reserved box, then the portrait box, with no stage between.
- const frames=await page.evaluate(()=>window.__frames);
+ const frames=await page.evaluate((name)=>window.__frames[name],PORTRAIT);
  assert.deepEqual(frames,[`${held.frame.w}x${held.frame.h}`,'225x400'],`the frame must change once, got ${frames.join(' -> ')}`);
- // A landscape card beside it neither moved nor resized.
+ // A landscape card beside it neither moved nor resized. Its frame was never
+ // any size but the reserved box, so the swap could not have reached it.
  assert.deepEqual(await measure(page,LANDSCAPE),heldLandscape);
+ const landscapeFrames=await page.evaluate((name)=>window.__frames[name],LANDSCAPE);
+ assert.deepEqual(landscapeFrames,[`${heldLandscape.frame.w}x${heldLandscape.frame.h}`],`a landscape frame must never resize, got ${landscapeFrames.join(' -> ')}`);
 
  assert.deepEqual(errors,[]);
  return {held,swapped,frames};
