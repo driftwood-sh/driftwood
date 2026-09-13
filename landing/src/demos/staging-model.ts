@@ -115,7 +115,104 @@ export type StagedDemo = {
   claim: string | null;
   /* What Pin acts on: the demo's leading item. */
   pinId: string;
+  /* Where the clip plays from when the demo has no review item behind it: the
+     library row's own url. Null on a demo grouped from review items, whose
+     clip is /d/<slug>. */
+  videoUrl: string | null;
+  /* What the demo is, in the library row's words. It sits where the bug line
+     sits, because a demo with no email has no bug line. */
+  note: string | null;
+  /* The library row this card came from, or null when review items made it.
+     A card with a row here has no review item, so Approve, Skip and Pin have
+     nothing to act on: every one of those writes names an item id. */
+  library: LibraryDemo | null;
 };
+
+/* ---------- the library ---------- */
+
+/* One hosted demo, as GET /dashboard/demos lists it. The fields this page
+   reads; the endpoint returns more. */
+export type LibraryDemo = {
+  demo_id: string;
+  lead_id: string | null;
+  lead_name: string | null;
+  company_name: string;
+  description: string | null;
+  artifact_id: string;
+  /* The demo's own slug, which is what a review item names in
+     attachment_slug. It is how the two sources recognise one demo. */
+  name: string;
+  content_type: string;
+  content_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/* "Dana Whitfield, Meridian" from a library row, which carries the two names
+   as plain text rather than as a lead. */
+export function libraryHeading(row: LibraryDemo): string {
+  const name = row.lead_name?.trim();
+  const company = row.company_name?.trim();
+  if (name && company) return `${name}, ${company}`;
+  return name || company || row.name;
+}
+
+/* A library demo as a Staging card. It has a clip, whoever it was made for,
+   its age, and the idea behind it. It has no email yet, and no review item,
+   so nothing on it can be approved. */
+export function stagedFromLibrary(row: LibraryDemo): StagedDemo {
+  return {
+    key: `library:${row.demo_id}`,
+    lead: null,
+    itemIds: [],
+    decidableIds: [],
+    canDecide: false,
+    policyVersion: 0,
+    createdAt: row.created_at,
+    heading: libraryHeading(row),
+    subject: null,
+    body: null,
+    videoSlug: null,
+    evidence: null,
+    claim: null,
+    pinId: "",
+    videoUrl: row.content_url,
+    note: row.description,
+    library: row,
+  };
+}
+
+/* Staging, from both of its sources, as one list.
+
+   A demo that exists and is neither queued nor sent is staged, whether or not
+   an email is written for it yet. Review items carry the ones with an email;
+   the library carries the rest. A demo in both sources is one demo, and the
+   review item wins it, because that copy has the email on it. The pair is
+   recognised by the lead it is for, or by the demo's own slug.
+
+   Newest first, across both sources: the work done today is the work a
+   customer opens the page to see. */
+export function stagedWithLibrary(
+  staged: StagedDemo[],
+  library: LibraryDemo[],
+  queued: SendRow[],
+): StagedDemo[] {
+  const leads = new Set<string>();
+  const slugs = new Set<string>();
+  for (const demo of staged) {
+    if (demo.lead) leads.add(demo.lead.lead_id);
+    if (demo.videoSlug) slugs.add(demo.videoSlug);
+  }
+  /* A demo already on its way out is not waiting on anyone. */
+  for (const send of queued) {
+    if (send.lead) leads.add(send.lead.lead_id);
+    if (send.attachment_slug) slugs.add(send.attachment_slug);
+  }
+  const rest = library
+    .filter((row) => !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name))
+    .map(stagedFromLibrary);
+  return [...staged, ...rest].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
 
 /* Demos are hosted at /d/<slug>. Items should carry attachment_slug, but
    early bug_validation rows named their demo only inside the evidence text,
@@ -174,6 +271,9 @@ export function groupStagedDemos(items: ReviewItem[]): StagedDemo[] {
       evidence: bug?.evidence ?? null,
       claim: bug?.body ?? null,
       pinId: (bug ?? sorted[0]).id,
+      videoUrl: null,
+      note: null,
+      library: null,
     });
   }
   return demos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));

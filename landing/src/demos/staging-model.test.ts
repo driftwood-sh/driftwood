@@ -23,11 +23,13 @@ import {
   groupQueueByDay,
   laterSummary,
   splitQueueDays,
+  stagedWithLibrary,
   timestampLabel,
   videoSeconds,
   sendingAccount,
   threadHref,
   type LeadContext,
+  type LibraryDemo,
   type ReviewItem,
   type SendRow,
 } from "./staging-model.ts";
@@ -420,4 +422,96 @@ test("an inline image is media, not a line to quote, and a bare body still colla
   assert.match(emailCollapsed(body).personal ?? "", /^I pulled the two workflow/);
   assert.deepEqual(emailCollapsed(null), { first: null, personal: null });
   assert.deepEqual(emailCollapsed("Hi."), { first: "Hi.", personal: null });
+});
+
+/* ---------- Staging's second source: the demo library ---------- */
+
+const libraryRow = (over: Partial<LibraryDemo>): LibraryDemo => ({
+  demo_id: "d1",
+  lead_id: null,
+  lead_name: null,
+  company_name: "Airbnb",
+  description: "The checkout step that drops a booking.",
+  artifact_id: "a1",
+  name: "photon-demo-airbnb",
+  content_type: "video/mp4",
+  content_url: "/d/photon-demo-airbnb",
+  created_at: "2026-09-12T09:00:00Z",
+  updated_at: "2026-09-12T09:00:00Z",
+  ...over,
+});
+
+test("a demo with no email yet is staged, with its clip, its idea and no decision", () => {
+  const demos = stagedWithLibrary([], [libraryRow({})], []);
+  assert.equal(demos.length, 1);
+  assert.equal(demos[0].key, "library:d1");
+  assert.equal(demos[0].heading, "Airbnb");
+  assert.equal(demos[0].videoUrl, "/d/photon-demo-airbnb");
+  assert.equal(demos[0].note, "The checkout step that drops a booking.");
+  assert.equal(demos[0].body, null);
+  assert.equal(demos[0].canDecide, false);
+  assert.deepEqual(demos[0].decidableIds, []);
+  assert.equal(demos[0].createdAt, "2026-09-12T09:00:00Z");
+});
+
+test("the contact leads the heading when the library row names one", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [libraryRow({ lead_name: "Priya Patel", company_name: "Northstar" })],
+    [],
+  );
+  assert.equal(demos[0].heading, "Priya Patel, Northstar");
+});
+
+test("a demo both sources hold is one card, and the review item keeps it", () => {
+  const staged = groupStagedDemos([item({ id: "email-1" })]);
+  const demos = stagedWithLibrary(
+    staged,
+    [libraryRow({ demo_id: "same-lead", lead_id: "l1", lead_name: "Dana Whitfield", company_name: "Meridian" })],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["lead:l1"],
+  );
+  assert.equal(demos[0].body, "Hey Dana");
+});
+
+test("the demo's own slug recognises the pair when the library row names no lead", () => {
+  const staged = groupStagedDemos([
+    item({ id: "bug-1", kind: "bug_validation", attachment_slug: "photon-demo-airbnb" }),
+  ]);
+  const demos = stagedWithLibrary(staged, [libraryRow({})], []);
+  assert.equal(demos.length, 1);
+  assert.equal(demos[0].videoSlug, "photon-demo-airbnb");
+});
+
+test("a demo already queued is not staged again", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [libraryRow({ lead_id: "l1" }), libraryRow({ demo_id: "d2", name: "photon-demo-omio" })],
+    [send({ lead: lead("l1", "Dana Whitfield", "Meridian") })],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:d2"],
+  );
+});
+
+test("both sources run newest first, because today's work is what a customer opens for", () => {
+  const staged = groupStagedDemos([
+    item({ id: "old-email", created_at: "2026-09-08T09:00:00Z" }),
+  ]);
+  const demos = stagedWithLibrary(
+    staged,
+    [
+      libraryRow({ demo_id: "newest", created_at: "2026-09-12T09:00:00Z" }),
+      libraryRow({ demo_id: "middle", created_at: "2026-09-10T09:00:00Z" }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:newest", "library:middle", "lead:l1"],
+  );
 });

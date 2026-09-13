@@ -9,6 +9,7 @@
    instead of throwing and the page says so beside the control. */
 
 import { getAccounts } from "../accounts/api";
+import { LIBRARY_CHUNK, fetchLibraryPage } from "./api";
 import { accountLabel } from "../accounts/model";
 import { getPolicy } from "../approvals/api";
 import type { ApprovalPolicy } from "../approvals/model";
@@ -16,6 +17,7 @@ import { getSettings, type SendSchedule } from "../settings/api";
 import type { QueueStat, ReviewItem, SendRow } from "./staging-model";
 
 export type { ApprovalPolicy, SendSchedule };
+export { LIBRARY_CHUNK, fetchLibraryPage };
 
 export type ReviewsPage = {
   pending: ReviewItem[];
@@ -258,6 +260,9 @@ function once<T>(start: () => Promise<T>): () => Promise<T> {
 }
 
 export const firstReviewsPage = once(() => fetchReviewsPage(0));
+/* Staging's second source: the demos the workspace already has, including the
+   ones with no email written for them yet. */
+export const firstLibraryPage = once(() => fetchLibraryPage(0));
 export const firstQueuePage = once(() => fetchQueuePage(0));
 export const firstSentPage = once(() => fetchSentPage());
 export const approvalPolicy = once(() => getPolicy());

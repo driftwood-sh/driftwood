@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- entry file, never hot-refreshed */
 import './mock'
 import { StrictMode, Suspense, lazy } from 'react'
+import { withMockMode } from './mock-mode'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { Analytics } from '@vercel/analytics/react'
 import './index.css'
@@ -20,7 +21,6 @@ const Campaigns = lazy(() => import('./campaigns/Campaigns.tsx'))
 const CampaignBuilder = lazy(() => import('./campaigns/CampaignBuilder.tsx'))
 const Audiences = lazy(() => import('./audiences/Audiences.tsx'))
 const DemosPage = lazy(() => import('./demos/DemosPage.tsx'))
-const DemoLibrary = lazy(() => import('./demos/Demos.tsx'))
 const Triggers = lazy(() => import('./triggers/Triggers.tsx'))
 const TriggerDetail = lazy(() => import('./triggers/TriggerDetail.tsx'))
 const FaceCloning = lazy(() => import('./face-cloning/FaceCloning.tsx'))
@@ -40,6 +40,13 @@ const requestedPath = window.location.pathname.replace(/\/+$/, '')
 // preserving the public URL. Opening that document directly should still land
 // on the workspace overview instead of rendering the marketing page.
 const path = requestedPath === '/dashboard.html' ? '/dashboard' : requestedPath
+// /dashboard/demos/library was the demo library's own page. Staging holds
+// the library now, so a link already shared opens the Demos page on Staging
+// instead of a page that is no longer there.
+const isLibraryPath = path === '/dashboard/demos/library'
+if (isLibraryPath) {
+  window.history.replaceState(null, '', withMockMode('/dashboard/demos?seg=staging'))
+}
 const campaignPathMatch = path.match(/^\/dashboard\/campaigns\/([^/]+)$/)
 const triggerPathMatch = path.match(/^\/dashboard\/triggers\/([^/]+)$/)
 // const page = path === '/pricing' ? <Pricing /> : <App />
@@ -53,12 +60,8 @@ const page =
     <WorkspacePage active="face-cloning"><FaceCloning /></WorkspacePage>
   ) : path === '/dashboard/assets' ? (
     <WorkspacePage active="settings"><SettingsTabs active="Product & brand assets" /><Assets /></WorkspacePage>
-  ) : path === '/dashboard/demos' ? (
+  ) : path === '/dashboard/demos' || isLibraryPath ? (
     <WorkspacePage active="demos"><DemosPage /></WorkspacePage>
-  ) : path === '/dashboard/demos/library' ? (
-    // Every demo we ever made, searchable. The Demos page links here from the
-    // foot of Sent; the day-to-day page is Staging, Queue and Sent.
-    <WorkspacePage active="demos"><DemoLibrary /></WorkspacePage>
   ) : path === '/dashboard/metrics' || path === '/dashboard/analytics' ? (
     <WorkspacePage active="metrics"><AnalyticsDashboard /></WorkspacePage>
   ) : path === '/dashboard/campaigns' ? (

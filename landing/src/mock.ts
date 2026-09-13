@@ -664,6 +664,9 @@ if (mockMode) {
   };
   const sendsApi = (_init?: RequestInit, url?: string) => {
     const params = new URL(url ?? "", location.origin).searchParams;
+    /* Nothing queued and nothing sent, so Queue and Sent are both empty. */
+    if (mockMode === "library-only")
+      return { sends: [], total: 0, limit: 100, offset: 0, counts: { pending: 0, pending_sends: 0, pending_system: 0, sent: 0 }, kind_counts: {} };
     if (params.get("view") !== "sent")
       return {
         ...sends,
@@ -851,7 +854,9 @@ if (mockMode) {
   const pendingReviewsApi = (_init?:RequestInit,url?:string) => {
     const query = new URL(url ?? location.href,location.href).searchParams;
     const offset = Number(query.get("offset") ?? 0), limit = Number(query.get("limit") ?? 100);
-    const pending = reviews.pending.filter((row) => row.status === "pending");
+    /* The library-only workspace has nothing pending: that is the whole point
+       of the fixture. */
+    const pending = mockMode === "library-only" ? [] : reviews.pending.filter((row) => row.status === "pending");
     return {...reviews,pending:pending.slice(offset,offset+limit).map((row) => ({...row,...reviewPermissions(row)})),total_pending:pending.length,offset,limit};
   };
   const decideReviews = (init?: RequestInit) => {
@@ -2595,10 +2600,37 @@ if (mockMode) {
     return { trigger: triggerRow(trigger), runs: trigger.runs, items: trigger.items };
   };
 
+  /* The demo library. Staging paints these beside the review items, because a
+     hosted demo with no email written for it yet is still the customer's own
+     work: it is earlier, not broken.
+
+     demo-northstar is the one both sources hold — a review pair for Priya
+     Patel is pending above — and it proves Staging shows that demo once, with
+     the email, rather than twice. */
   const demoRows = [
+    { demo_id: "demo-northstar", lead_id: "Priya Patel", lead_name: "Priya Patel", company_name: "Northstar", description: "The plan choice the pricing page drops.", artifact_id: "demo-artifact-northstar", name: "northstar-pricing", content_type: "video/mp4", content_url: "/compare.mp4", created_at: hoursAgo(30), updated_at: hoursAgo(29) },
     { demo_id: "demo-lead-1", lead_id: "demo-lead-1", lead_name: "Example lead", company_name: "Sample company", description: "A sample of the personalized walkthrough your leads will receive.", artifact_id: "demo-artifact-1", name: "sample-walkthrough", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(24), updated_at: hoursAgo(2) },
     { demo_id: "demo-lead-2", lead_id: "demo-lead-2", lead_name: "Another example lead", company_name: "Sample account", description: "A still from the demo, ready for your review.", artifact_id: "demo-artifact-2", name: "sample-demo-preview", content_type: "image/webp", content_url: "/demo-still.webp", created_at: hoursAgo(48), updated_at: hoursAgo(24) },
   ];
+  /* ?mock=library-only — the workspace this page was broken for: demos made,
+     nothing pending, nothing scheduled. Twelve videos and three empty
+     segments, which is what sent a customer to an empty page. */
+  const libraryOnlyRows = [
+    "airbnb", "bookaway", "booking-com", "flixbus", "hostelworld", "omio",
+    "getyourguide", "klook", "rome2rio", "trainline", "tripadvisor", "viator",
+  ].map((company, index) => ({
+    demo_id: `photon-${company}`,
+    lead_id: null,
+    lead_name: null,
+    company_name: company.replace(/-com$/, ".com").replace(/(^|-)([a-z])/g, (_, gap, letter) => (gap ? " " : "") + letter.toUpperCase()),
+    description: index % 2 === 0 ? "The checkout step that drops a booking." : null,
+    artifact_id: `photon-artifact-${company}`,
+    name: `photon-demo-${company}`,
+    content_type: "video/mp4",
+    content_url: index % 3 === 0 ? "/case-autosana.mp4" : index % 3 === 1 ? "/compare.mp4" : "/case-oruk.mp4",
+    created_at: hoursAgo(6 + index * 5),
+    updated_at: hoursAgo(2 + index * 5),
+  }));
   const demosApi = (init?: RequestInit, url?: string) => {
     if (init?.method === "POST") {
       if (mockMode === "demos-feedback-error") return new Response(JSON.stringify({ error: { detail: "Your feedback could not be delivered. Please try again." } }), { status: 502 });
@@ -2609,7 +2641,8 @@ if (mockMode) {
     const q = (query.get("q") ?? "").toLowerCase();
     const limit = Number(query.get("limit") ?? 12);
     const offset = Number(query.get("offset") ?? 0);
-    const rows = mockMode === "demos-empty" ? [] : demoRows.filter((demo) => `${demo.company_name} ${demo.lead_name} ${demo.name}`.toLowerCase().includes(q));
+    const library = mockMode === "library-only" ? libraryOnlyRows : demoRows;
+    const rows = mockMode === "demos-empty" ? [] : library.filter((demo) => `${demo.company_name} ${demo.lead_name} ${demo.name}`.toLowerCase().includes(q));
     return { demos: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
   };
 

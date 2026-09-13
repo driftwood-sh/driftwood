@@ -283,6 +283,15 @@
 .dp-glyph { display: inline-flex; color: var(--color-ink-soft); }
 
 
+/* The idea behind a demo that has no email yet: one line, where the bug line
+   sits on a demo that has one. */
+.dp-idea {
+  margin: 0.5rem 0 0;
+  color: var(--color-ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 /* The bug line: where it happens, and the steps behind a disclosure. */
 .dp-bugline { margin-top: 0.5rem; }
 .dp-bugline > p { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0; }

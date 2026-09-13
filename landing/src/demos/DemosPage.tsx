@@ -4,16 +4,20 @@ import { fetchInWaves, useToast } from "../dashboard-shared";
 import { analyticsWindow } from "../analytics/model";
 import { withMockMode } from "../mock-mode";
 import { announceDemosCountChanged } from "./nav-count";
+import { sendFeedback } from "./api";
 import {
+  LIBRARY_CHUNK,
   PAGE_GUARD,
   REVIEW_CHUNK,
   SEND_CHUNK,
   approvalPolicy,
   decide,
+  fetchLibraryPage,
   fetchQueuePage,
   fetchReviewsPage,
   fetchRepliedLeads,
   fetchSentPage,
+  firstLibraryPage,
   firstQueuePage,
   firstReviewsPage,
   firstSentPage,
@@ -47,12 +51,14 @@ import {
   queueRows,
   runsThrough,
   splitQueueDays,
+  stagedWithLibrary,
   threadHref,
   timestampLabel,
   videoSeconds,
   type DailyLimits,
   type QueueDay,
   type QueueRow,
+  type LibraryDemo,
   type QueueStat,
   type ReviewItem,
   type SendRow,
@@ -63,8 +69,15 @@ import "./demos-page.css";
 /* /dashboard/demos — the customer's own page for the demos we make them.
 
    Three segments, and nothing on any of them describes our work. Staging is
-   what waits on the customer. Queue is what is going out, in order, with the
-   controls to cut it. Sent is what went out and what came back.
+   every demo that is neither queued nor sent. Queue is what is going out, in
+   order, with the controls to cut it. Sent is what went out and what came
+   back.
+
+   Staging reads two sources and paints one list. Review items carry the demos
+   that already have an email written for them. The demo library carries the
+   rest: a hosted clip with no email yet is not broken, it is earlier, and
+   before this it rendered nowhere at all. staging-model.ts merges the two and
+   drops the duplicates.
 
    Not here on purpose: "Coming", the list of names asked for through Send
    demos. Demo requests are stored per campaign today
@@ -100,6 +113,8 @@ type StagingData = {
 };
 
 type QueueData = { sends: SendRow[]; complete: boolean; loadingMore: boolean };
+/* The library, which Staging paints beside the review items. */
+type LibraryData = { rows: LibraryDemo[]; complete: boolean };
 type SentData = { sends: SendRow[]; total: number };
 
 /* Every control on the page that arms before it runs. One at a time, so
@@ -171,9 +186,22 @@ function writeDayState(state: Record<string, boolean>) {
   }
 }
 
-function segmentFromUrl(): Segment {
+/* The segment the reader asked for, or null when they have not asked. Null
+   opens the first segment that has anything in it, so a workspace whose work
+   is all in one segment never lands on an empty page. */
+function segmentFromUrl(): Segment | null {
   const value = new URLSearchParams(window.location.search).get("seg");
-  return value === "queue" || value === "sent" ? value : "staging";
+  return value === "queue" || value === "sent" || value === "staging" ? value : null;
+}
+
+/* The segment a page with no explicit choice opens on: the first one that
+   has rows. Staging when every list is empty, because that is where a
+   workspace's first demo shows up. */
+function firstWithRows(staging: number, queue: number, sent: number): Segment {
+  if (staging > 0) return "staging";
+  if (queue > 0) return "queue";
+  if (sent > 0) return "sent";
+  return "staging";
 }
 
 /* Pages of a list, first page painted before the rest arrives. */
@@ -213,6 +241,7 @@ async function loadPaged<T>(
 /* Kicks the first reads off at chunk eval, beside /auth/me. The sidebar's
    Demos count shares these promises, so opening the page adds no request. */
 void firstReviewsPage();
+void firstLibraryPage();
 void firstQueuePage();
 void firstSentPage();
 void approvalPolicy();
@@ -220,8 +249,9 @@ void workspaceSettings();
 
 export default function DemosPage() {
   const toast = useToast();
-  const [segment, setSegment] = useState<Segment>(segmentFromUrl);
+  const [segment, setSegment] = useState<Segment | null>(segmentFromUrl);
   const [staging, setStaging] = useState<Load<StagingData>>({ status: "loading" });
+  const [library, setLibrary] = useState<Load<LibraryData>>({ status: "loading" });
   const [queue, setQueue] = useState<Load<QueueData>>({ status: "loading" });
   const [sent, setSent] = useState<Load<SentData>>({ status: "loading" });
   const [autoApproved, setAutoApproved] = useState<boolean | null>(null);
@@ -292,6 +322,36 @@ export default function DemosPage() {
     }
   }, []);
 
+  const loadLibrary = useCallback(async (fresh: boolean) => {
+    try {
+      await loadPaged<LibraryDemo>(
+        async () => {
+          const page = await (fresh ? fetchLibraryPage(0) : firstLibraryPage());
+          return { rows: page.demos, total: page.total };
+        },
+        LIBRARY_CHUNK,
+        async (offset) => {
+          const page = await fetchLibraryPage(offset);
+          return { rows: page.demos, total: page.total };
+        },
+        (row) => row.demo_id,
+        (rows, _total, complete) => setLibrary({ status: "ready", data: { rows, complete } }),
+        (rows, complete) =>
+          setLibrary((prev) =>
+            prev.status === "ready"
+              ? { status: "ready", data: { rows: [...prev.data.rows, ...rows], complete } }
+              : prev,
+          ),
+      );
+    } catch {
+      /* Staging still paints the review items. A count over half a list would
+         be a wrong number, so the segment carries none until this lands. */
+      setLibrary((prev) =>
+        prev.status === "ready" ? prev : { status: "error", message: LOAD_FAILED },
+      );
+    }
+  }, []);
+
   const loadQueue = useCallback(async (fresh: boolean) => {
     try {
       await loadPaged<SendRow>(
@@ -335,9 +395,37 @@ export default function DemosPage() {
 
   useEffect(() => {
     void (async () => {
-      await Promise.all([loadStaging(false), loadQueue(false), loadSent(false)]);
+      await Promise.all([
+        loadStaging(false),
+        loadLibrary(false),
+        loadQueue(false),
+        loadSent(false),
+      ]);
+      /* Now that the lists have landed, open the first segment that has rows,
+         so nobody lands on an empty page. A segment the reader picked wins,
+         and once this choice is made it stands: a list the reader empties by
+         their own work must not move the page under them.
+
+         These are the same memoized first pages the loads above read, so the
+         choice costs no request. */
+      const [reviewsPage, libraryPage, queuePage, sentPage] = await Promise.all([
+        firstReviewsPage().catch(() => null),
+        firstLibraryPage().catch(() => null),
+        firstQueuePage().catch(() => null),
+        firstSentPage().catch(() => null),
+      ]);
+      const staged = stagedWithLibrary(
+        reviewsPage ? readyForYou(groupStagedDemos(reviewsPage.pending)) : [],
+        libraryPage?.demos ?? [],
+        queuePage?.sends ?? [],
+      );
+      const queued = queueRows(queuePage?.sends ?? [], new Set(), EMPTY_SENDERS);
+      const sentRows = groupSentByDay(sentPage?.sends ?? []);
+      setSegment(
+        (picked) => picked ?? firstWithRows(staged.length, queued.length, sentRows.length),
+      );
     })();
-  }, [loadStaging, loadQueue, loadSent]);
+  }, [loadStaging, loadLibrary, loadQueue, loadSent]);
 
   useEffect(() => {
     let live = true;
@@ -433,8 +521,19 @@ export default function DemosPage() {
      demos that are actually waiting on this viewer. The bug_validation item
      always belongs to Driftwood, so a demo with no customer-decidable item is
      still in our own gate and never reaches their page. */
-  const stagedDemos: StagedDemo[] =
+  const reviewDemos: StagedDemo[] =
     staging.status === "ready" ? readyForYou(groupStagedDemos(staging.data.items)) : [];
+  /* Staging, from both sources, newest first. A demo the library holds and a
+     review item covers is one card, and the review item keeps it: that copy
+     carries the email. */
+  const stagedDemos: StagedDemo[] = stagedWithLibrary(
+    reviewDemos,
+    library.status === "ready" ? library.data.rows : [],
+    queue.status === "ready" ? queue.data.sends : [],
+  );
+  /* The cards a decision can act on. A demo with no email yet has no review
+     item behind it, so Approve all leaves it where it is. */
+  const decidable = stagedDemos.filter((demo) => demo.canDecide);
 
   const rows =
     /* The account pools are no longer read here: the From cell comes from the
@@ -464,6 +563,10 @@ export default function DemosPage() {
      header over empty cells is worse than no column. */
   const showAccount = visibleDays.some((day) => day.rows.some((row) => rowSender(row) !== null));
   const sentDays = sent.status === "ready" ? groupSentByDay(sent.data.sends) : [];
+
+  /* Staging until the lists land and say otherwise: it is where a new
+     workspace's first demo shows up. */
+  const shown: Segment = segment ?? "staging";
 
   /* One decide POST per press: every pending item of the demo, together. */
   async function submitDecision(
@@ -520,8 +623,34 @@ export default function DemosPage() {
     }
   }
 
+  /* A demo with no email yet has no review item, so a change to it cannot be
+     a decision. It goes out the way the library's own note always did. */
+  async function sendLibraryChange(demo: StagedDemo, text: string) {
+    const row = demo.library;
+    if (!row) return;
+    markBusy(demo.key, true);
+    setCardError(null);
+    try {
+      await sendFeedback(row, text, "needs_changes");
+      setChangeOpen((prev) => (prev === demo.key ? null : prev));
+      setDrafts((prev) => {
+        if (!(demo.key in prev)) return prev;
+        const next = { ...prev };
+        delete next[demo.key];
+        return next;
+      });
+      toast("Change sent.", "success");
+    } catch (error) {
+      setCardError({
+        key: demo.key,
+        message: error instanceof Error ? error.message : LOAD_FAILED,
+      });
+    } finally {
+      markBusy(demo.key, false);
+    }
+  }
+
   async function runApproveAll() {
-    const decidable = stagedDemos;
     if (decidable.length === 0) return;
     markBusy("all", true);
     setCardError(null);
@@ -724,16 +853,37 @@ export default function DemosPage() {
     toast(allHeld ? "Sends resumed." : "Sends paused.", "success");
   }
 
-  const stagingCount = staging.status === "ready" && staging.data.complete ? stagedDemos.length : null;
+  /* Both of Staging's sources have to be whole before it can carry a number:
+     half a list is a wrong number, not a smaller one. */
+  const stagingLoaded =
+    staging.status === "ready" &&
+    staging.data.complete &&
+    library.status === "ready" &&
+    library.data.complete;
+  const stagingCount = stagingLoaded ? stagedDemos.length : null;
+  /* One source still paging in. The list already paints; a whole-list action
+     waits for the rest. */
+  const stagingMore =
+    (staging.status === "ready" && !staging.data.complete) ||
+    (library.status === "ready" && !library.data.complete);
+  const stagingFailed = staging.status === "error" || library.status === "error";
+  const retryStaging = () => {
+    setStaging({ status: "loading" });
+    setLibrary({ status: "loading" });
+    void loadStaging(true);
+    void loadLibrary(true);
+  };
   const queueCount = queue.status === "ready" && queue.data.complete ? rows.length : null;
   /* The count is what the segment lists, not what the ledger holds: the
      ledger also carries connection requests, which are not demos and are not
      on this page, so `total` would name rows the reader cannot find. */
   const sentCount = sent.status === "ready" ? sentDays.reduce((n, day) => n + day.rows.length, 0) : null;
   const counts: Record<Segment, number | null> = {
-    /* Nothing waits on a customer whose demos Driftwood approves, so the
-       segment carries no number rather than a zero that reads as "empty". */
-    staging: autoApproved === true ? null : stagingCount,
+    /* Nothing waits on a customer whose demos Driftwood approves, so an empty
+       Staging carries no number rather than a zero that reads as "empty". The
+       demos with no email yet still count: they are the customer's own work,
+       whoever approves. */
+    staging: autoApproved === true && stagedDemos.length === 0 ? null : stagingCount,
     queue: queueCount,
     sent: sentCount,
   };
@@ -749,7 +899,7 @@ export default function DemosPage() {
           <button
             key={id}
             type="button"
-            aria-pressed={segment === id}
+            aria-pressed={shown === id}
             onClick={() => switchSegment(id)}
           >
             {label}
@@ -760,12 +910,53 @@ export default function DemosPage() {
         ))}
       </div>
 
-      {segment === "staging" && (
+      {shown === "staging" && (
         <>
-          {autoApproved === true ? (
-            /* Driftwood approves here, so nothing waits on this customer. The
-               empty state says that in four words; a paragraph about who
-               approves said it in eleven and changed nothing. */
+          <div className="dp-bar is-bare">
+            <div>
+              {stagingMore && (
+                <p className="dp-quiet" role="status">
+                  Loading the rest.
+                </p>
+              )}
+            </div>
+            {decidable.length > 1 && (
+              <div className="dp-bar-actions">
+                <button
+                  type="button"
+                  className={`dp-btn ${isArmed({ kind: "approve-all" }) ? "is-armed" : "is-primary"}`}
+                  onClick={() => armOrRun({ kind: "approve-all" }, () => void runApproveAll())}
+                  disabled={busy.has("all") || !stagingLoaded}
+                  title={
+                    busy.has("all")
+                      ? "Approving these demos now"
+                      : !stagingLoaded
+                        ? "Available once the whole list loads"
+                        : undefined
+                  }
+                >
+                  {busy.has("all")
+                    ? "Approving"
+                    : isArmed({ kind: "approve-all" })
+                      ? `Approve all ${decidable.length.toLocaleString()}? Confirm`
+                      : "Approve all"}
+                </button>
+              </div>
+            )}
+          </div>
+          {cardError?.key === "all" && (
+            <p className="dp-error" role="alert">
+              {cardError.message}
+            </p>
+          )}
+          {staging.status === "loading" && library.status === "loading" ? (
+            <CardSkeletons />
+          ) : stagedDemos.length === 0 && stagingFailed ? (
+            /* One source failing with the other empty leaves nothing to
+               paint, and "nothing waiting for you" would be a lie about a
+               read that did not land. */
+            <ErrorState message={LOAD_FAILED} onRetry={retryStaging} />
+          ) : stagedDemos.length === 0 ? (
             <div className="dp-empty">
               <p>{EMPTY_STAGING}</p>
               <button type="button" className="dp-btn" onClick={() => switchSegment("queue")}>
@@ -773,107 +964,44 @@ export default function DemosPage() {
               </button>
             </div>
           ) : (
-            <>
-              <div className="dp-bar is-bare">
-                <div>
-                  {staging.status === "ready" && !staging.data.complete && (
-                    <p className="dp-quiet" role="status">
-                      Loading the rest.
-                    </p>
-                  )}
-                </div>
-                {stagedDemos.length > 1 && (
-                  <div className="dp-bar-actions">
-                    <button
-                      type="button"
-                      className={`dp-btn ${isArmed({ kind: "approve-all" }) ? "is-armed" : "is-primary"}`}
-                      onClick={() =>
-                        armOrRun({ kind: "approve-all" }, () => void runApproveAll())
-                      }
-                      disabled={
-                        busy.has("all") ||
-                        staging.status !== "ready" ||
-                        !staging.data.complete
-                      }
-                      title={
-                        busy.has("all")
-                          ? "Approving these demos now"
-                          : staging.status === "ready" && !staging.data.complete
-                            ? "Available once the whole list loads"
-                            : undefined
-                      }
-                    >
-                      {busy.has("all")
-                        ? "Approving"
-                        : isArmed({ kind: "approve-all" })
-                          ? `Approve all ${stagedDemos.length.toLocaleString()}? Confirm`
-                          : "Approve all"}
-                    </button>
-                  </div>
-                )}
-              </div>
-              {cardError?.key === "all" && (
-                <p className="dp-error" role="alert">
-                  {cardError.message}
-                </p>
-              )}
-              {staging.status === "loading" ? (
-                <CardSkeletons />
-              ) : staging.status === "error" ? (
-                <ErrorState
-                  message={staging.message}
-                  onRetry={() => {
-                    setStaging({ status: "loading" });
-                    void loadStaging(true);
+            <div className="dp-cards">
+              {stagedDemos.map((demo) => (
+                <DemoCard
+                  key={demo.key}
+                  demo={demo}
+                  busy={busy.has(demo.key)}
+                  pinnable={pinnable || pinned.has(demo.key)}
+                  pinned={pinned.has(demo.key)}
+                  armedSkip={isArmed({ kind: "skip", key: demo.key })}
+                  change={changeOpen === demo.key ? (drafts[demo.key] ?? "") : null}
+                  error={cardError?.key === demo.key ? cardError.message : null}
+                  onApprove={() => void submitDecision(demo, "approve", undefined, "Approved.")}
+                  onSkip={() =>
+                    armOrRun({ kind: "skip", key: demo.key }, () =>
+                      void submitDecision(demo, "deny", "Skipped in Staging", "Skipped."),
+                    )
+                  }
+                  onOpenChange={() =>
+                    setChangeOpen((prev) => (prev === demo.key ? null : demo.key))
+                  }
+                  onChangeText={(text) =>
+                    setDrafts((prev) => ({ ...prev, [demo.key]: text }))
+                  }
+                  onSendChange={() => {
+                    const text = (drafts[demo.key] ?? "").trim();
+                    if (!text) return;
+                    if (demo.library) void sendLibraryChange(demo, text);
+                    else void submitDecision(demo, "deny", text, "Change sent.");
                   }}
+                  onPin={() => void togglePin(demo)}
                 />
-              ) : stagedDemos.length === 0 ? (
-                <div className="dp-empty">
-                  <p>{EMPTY_STAGING}</p>
-                  <button type="button" className="dp-btn" onClick={() => switchSegment("queue")}>
-                    See Queue
-                  </button>
-                </div>
-              ) : (
-                <div className="dp-cards">
-                  {stagedDemos.map((demo) => (
-                    <DemoCard
-                      key={demo.key}
-                      demo={demo}
-                      busy={busy.has(demo.key)}
-                      pinnable={pinnable || pinned.has(demo.key)}
-                      pinned={pinned.has(demo.key)}
-                      armedSkip={isArmed({ kind: "skip", key: demo.key })}
-                      change={changeOpen === demo.key ? (drafts[demo.key] ?? "") : null}
-                      error={cardError?.key === demo.key ? cardError.message : null}
-                      onApprove={() => void submitDecision(demo, "approve", undefined, "Approved.")}
-                      onSkip={() =>
-                        armOrRun({ kind: "skip", key: demo.key }, () =>
-                          void submitDecision(demo, "deny", "Skipped in Staging", "Skipped."),
-                        )
-                      }
-                      onOpenChange={() =>
-                        setChangeOpen((prev) => (prev === demo.key ? null : demo.key))
-                      }
-                      onChangeText={(text) =>
-                        setDrafts((prev) => ({ ...prev, [demo.key]: text }))
-                      }
-                      onSendChange={() => {
-                        const text = (drafts[demo.key] ?? "").trim();
-                        if (!text) return;
-                        void submitDecision(demo, "deny", text, "Change sent.");
-                      }}
-                      onPin={() => void togglePin(demo)}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
         </>
       )}
 
-      {segment === "queue" && (
+      {shown === "queue" && (
         <>
           <div className="dp-bar">
             {queue.status === "ready" ? (
@@ -1063,7 +1191,7 @@ export default function DemosPage() {
           )}
         </>
       )}
-      {segment === "sent" && (
+      {shown === "sent" && (
         <>
           {sent.status === "loading" ? (
             <RowSkeletons />
@@ -1106,9 +1234,6 @@ export default function DemosPage() {
               </table>
             </div>
           )}
-          <p className="dp-quiet">
-            <a href={withMockMode("/dashboard/demos/library")}>All demo videos</a>
-          </p>
         </>
       )}
     </section>
@@ -1148,6 +1273,12 @@ function DemoCard({
 }) {
   const lead = demo.lead;
   const videoRef = useRef<HTMLVideoElement>(null);
+  /* Review items name a demo by slug, hosted at /d/<slug>. A library row
+     carries its own url. */
+  const clipHref = demo.videoUrl ?? (demo.videoSlug ? `/d/${demo.videoSlug}` : null);
+  /* A still or a page cannot play in a video element, so it opens in a tab
+     instead of rendering as a clip that failed. */
+  const playsInPlace = demo.library === null || demo.library.content_type.startsWith("video/");
   /* A clip that will not play has no moment to jump to, so the timestamp
      link goes with it rather than becoming a dead click. */
   const [videoFailed, setVideoFailed] = useState(false);
@@ -1187,19 +1318,27 @@ function DemoCard({
           the width sat empty. */}
       <div className="dp-card-body">
         <div className="dp-col-clip">
-          {demo.videoSlug && (
+          {clipHref && (
             <DemoVideo
               ref={videoRef}
-              slug={demo.videoSlug}
+              href={clipHref}
               label={demo.heading}
+              playable={playsInPlace}
               onFailed={() => setVideoFailed(true)}
             />
           )}
-          <BugLine
-            demo={demo}
-            playable={Boolean(demo.videoSlug) && !videoFailed}
-            onSeek={seekVideo}
-          />
+          {/* A demo made for a review item says which bug it shows. A demo
+              from the library says what it is, in the words it was made
+              with. Either way it is one line under the clip. */}
+          {demo.library ? (
+            demo.note && <p className="dp-idea">{demo.note}</p>
+          ) : (
+            <BugLine
+              demo={demo}
+              playable={Boolean(clipHref) && playsInPlace && !videoFailed}
+              onSeek={seekVideo}
+            />
+          )}
         </div>
         {demo.body && (
           <div className="dp-col-email">
@@ -1218,18 +1357,23 @@ function DemoCard({
         )}
       </div>
 
-      {demo.canDecide && (
+      {(demo.canDecide || demo.library !== null) && (
         <>
           <div className="dp-actions">
-            <button
-              type="button"
-              className="dp-btn is-primary"
-              onClick={onApprove}
-              disabled={busy}
-              title={busy ? "Working on this demo now" : undefined}
-            >
-              {busy ? "Working" : "Approve"}
-            </button>
+            {/* Approve, Skip and Pin each name a review item, and a demo with
+                no email yet has none: the one thing the customer can do with
+                it is say what should change. */}
+            {demo.canDecide && (
+              <button
+                type="button"
+                className="dp-btn is-primary"
+                onClick={onApprove}
+                disabled={busy}
+                title={busy ? "Working on this demo now" : undefined}
+              >
+                {busy ? "Working" : "Approve"}
+              </button>
+            )}
             <button
               type="button"
               className={`dp-btn ${change !== null ? "is-on" : ""}`}
@@ -1240,16 +1384,18 @@ function DemoCard({
             >
               Ask for a change
             </button>
-            <button
-              type="button"
-              className={`dp-btn ${armedSkip ? "is-armed" : ""}`}
-              onClick={onSkip}
-              disabled={busy}
-              title={busy ? "Working on this demo now" : undefined}
-            >
-              {busy ? "Working" : armedSkip ? "Skip? Confirm" : "Skip"}
-            </button>
-            {pinnable && (
+            {demo.canDecide && (
+              <button
+                type="button"
+                className={`dp-btn ${armedSkip ? "is-armed" : ""}`}
+                onClick={onSkip}
+                disabled={busy}
+                title={busy ? "Working on this demo now" : undefined}
+              >
+                {busy ? "Working" : armedSkip ? "Skip? Confirm" : "Skip"}
+              </button>
+            )}
+            {demo.canDecide && pinnable && (
               <button
                 type="button"
                 className={`dp-btn ${pinned ? "is-on" : ""}`}
@@ -1382,18 +1528,21 @@ function BugLine({
    turning the card's biggest element into an error message. */
 function DemoVideo({
   ref,
-  slug,
+  href,
   label,
+  playable,
   onFailed,
 }: {
   ref: RefObject<HTMLVideoElement | null>;
-  slug: string;
+  href: string;
   label: string;
+  /* False for a demo that is a still or a page: it opens in a tab, which is
+     the same frame a clip that will not play already falls back to. */
+  playable: boolean;
   onFailed: () => void;
 }) {
   const [duration, setDuration] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const href = `/d/${slug}`;
+  const [failed, setFailed] = useState(!playable);
   return (
     <div className="dp-video-shell">
       {failed ? (

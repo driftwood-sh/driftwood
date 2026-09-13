@@ -40,6 +40,19 @@ export async function listDemos(query: string, offset: number, signal: AbortSign
   }) };
 }
 
+/* The whole library, for Staging. A demo with no email yet has no review item
+   and no send, so this read is the only place it exists.
+
+   The endpoint caps limit at 50, so a big library arrives as pages.
+   staging-api.ts memoizes the first page, the way it does the other firsts. */
+export const LIBRARY_CHUNK = 50;
+
+export async function fetchLibraryPage(offset: number): Promise<DemosPage> {
+  return request<DemosPage>(
+    `/api/v1/dashboard/demos?${new URLSearchParams({ q: "", offset: String(offset), limit: String(LIBRARY_CHUNK) })}`,
+  );
+}
+
 export async function sendFeedback(demo: Demo, message: string, sentiment: Sentiment): Promise<void> {
   const result = await request<{ delivered: boolean }>(`/api/v1/dashboard/demos/${encodeURIComponent(demo.demo_id)}/feedback`, {
     method: "POST",
