@@ -332,17 +332,26 @@
 .dp-steps p { margin: 0.55rem 0 0; font-size: 0.8rem; overflow-wrap: anywhere; }
 .dp-steps a { color: var(--color-tide); }
 
-/* The clip leads the card, and is bounded: a 16:9 frame that cannot grow
-   past a third of a laptop screen, so twenty demos stay reviewable. */
+/* The clip leads the card, and is bounded: a frame that cannot grow past a
+   third of a laptop screen, so twenty demos stay reviewable.
+
+   The shell carries the shape, and the clip fills it. 16:9 is the frame held
+   from first paint and the frame a landscape or square clip keeps. A portrait
+   clip replaces both values from the pixel size the file reports, so the card
+   frames a phone recording as a phone recording (see clip-frame.ts). */
 .dp-video-shell {
   position: relative;
   width: 100%;
+  aspect-ratio: 16 / 9;
+  /* A portrait frame is narrower than the rail, so it sits in the middle of
+     the rail instead of against its left edge. */
+  margin-inline: auto;
 }
 
 .dp-video {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   border-radius: 0.7rem;
   background: var(--color-ink);
   /* contain, not cover: a prospect's clip is whatever shape it was recorded
