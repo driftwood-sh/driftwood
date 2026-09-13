@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppShell from "../dashboard/AppShell";
 import { LoggedOutView, ToastProvider } from "../dashboard/DashboardCommon";
 import { AdminPanelControls, ImpersonationBanner } from "../GodMode";
@@ -69,6 +69,10 @@ function DriftView({ user }: { user: User }) {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingAgent, setPendingAgent] = useState<string | null>(null);
+  const handleDirty = useCallback((value: boolean) => {
+    setDirty(value);
+    if (!value) setPendingAgent(null);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     fetchOverview(controller.signal)
@@ -197,7 +201,7 @@ function DriftView({ user }: { user: User }) {
               key={agentId}
               agentId={agentId}
               overview={overview}
-              onDirty={setDirty}
+              onDirty={handleDirty}
               onBusy={setBusy}
             />
           ) : (

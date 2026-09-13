@@ -109,6 +109,8 @@ async function checkEditor(page, name) {
     "photon",
   );
 
+  await page.getByLabel("Agent", { exact: true }).selectOption("autosana");
+  await page.getByRole("button", { name: "Discard and switch" }).waitFor();
   await page.evaluate(() => {
     window.holdWorkflowSave = true;
   });
@@ -138,6 +140,10 @@ async function checkEditor(page, name) {
     .filter({ hasText: "Changes saved for future demos." })
     .waitFor();
   const request = await page.evaluate(() => window.workflowRequests[0]);
+  assert.equal(
+    await page.getByRole("button", { name: "Discard and switch" }).count(),
+    0,
+  );
   assert.deepEqual(Object.keys(request).sort(), ["changes", "version"]);
   assert.match(request.version, /^[a-f0-9]{64}$/);
   assert.deepEqual(request.changes, {
