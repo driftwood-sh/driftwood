@@ -493,6 +493,42 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Approved, and nobody to send it to yet: the group above the queue's days.
+   Its header names the group instead of folding it, so it carries neither a
+   chevron nor a checkbox — there is nothing on these rows to select and
+   nothing about them to hide. */
+.dp-approved .dp-day-head { padding: 0.2rem 0.35rem; }
+.dp-approved .dp-day-name { margin: 0; }
+
+/* The one line a demo carries when nobody was found, and the field that
+   answers it. */
+.dp-nobody { color: var(--color-ink-soft); }
+
+.dp-name { margin-top: 0.5rem; max-width: 20rem; }
+
+.dp-name input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.dp-name input:focus { border-color: var(--color-tide); outline: none; }
+
+.dp-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
 .dp-check { width: 1rem; height: 1rem; flex: 0 0 auto; accent-color: var(--color-tide); cursor: pointer; }
 
 .dp-table tr.is-picked { background: var(--color-tide-wash); }
