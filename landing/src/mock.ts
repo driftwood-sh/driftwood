@@ -2613,24 +2613,36 @@ if (mockMode) {
     { demo_id: "demo-lead-2", lead_id: "demo-lead-2", lead_name: "Another example lead", company_name: "Sample account", description: "A still from the demo, ready for your review.", artifact_id: "demo-artifact-2", name: "sample-demo-preview", content_type: "image/webp", content_url: "/demo-still.webp", created_at: hoursAgo(48), updated_at: hoursAgo(24) },
   ];
   /* ?mock=library-only — the workspace this page was broken for: demos made,
-     nothing pending, nothing scheduled. Twelve videos and three empty
-     segments, which is what sent a customer to an empty page. */
-  const libraryOnlyRows = [
+     nothing pending, nothing scheduled. Three empty segments is what sent a
+     customer to an empty page.
+
+     111 rows, the size of a real library: 11 named companies and 100 runs
+     behind them. The endpoint hands back 50 at a time, so this fixture is
+     also the one that proves Staging pages the library instead of stopping
+     at the first 50. */
+  const libraryNames = [
     "airbnb", "bookaway", "booking-com", "flixbus", "hostelworld", "omio",
-    "getyourguide", "klook", "rome2rio", "trainline", "tripadvisor", "viator",
-  ].map((company, index) => ({
-    demo_id: `photon-${company}`,
-    lead_id: null,
-    lead_name: null,
-    company_name: company.replace(/-com$/, ".com").replace(/(^|-)([a-z])/g, (_, gap, letter) => (gap ? " " : "") + letter.toUpperCase()),
-    description: index % 2 === 0 ? "The checkout step that drops a booking." : null,
-    artifact_id: `photon-artifact-${company}`,
-    name: `photon-demo-${company}`,
-    content_type: "video/mp4",
-    content_url: index % 3 === 0 ? "/case-autosana.mp4" : index % 3 === 1 ? "/compare.mp4" : "/case-oruk.mp4",
-    created_at: hoursAgo(6 + index * 5),
-    updated_at: hoursAgo(2 + index * 5),
-  }));
+    "getyourguide", "klook", "rome2rio", "trainline", "tripadvisor",
+  ];
+  const libraryOnlyRows = Array.from({ length: 111 }, (_, index) => {
+    const named = index < libraryNames.length;
+    const slug = named ? libraryNames[index] : `run-${String(index - libraryNames.length + 1).padStart(3, "0")}`;
+    return {
+      demo_id: `photon-${slug}`,
+      lead_id: null,
+      lead_name: null,
+      company_name: named
+        ? libraryNames[index].replace(/-com$/, ".com").replace(/(^|-)([a-z])/g, (_, gap, letter) => (gap ? " " : "") + letter.toUpperCase())
+        : `Demo run ${index - libraryNames.length + 1}`,
+      description: index % 2 === 0 ? "The checkout step that drops a booking." : null,
+      artifact_id: `photon-artifact-${slug}`,
+      name: `photon-demo-${slug}`,
+      content_type: "video/mp4",
+      content_url: index % 3 === 0 ? "/case-autosana.mp4" : index % 3 === 1 ? "/compare.mp4" : "/case-oruk.mp4",
+      created_at: hoursAgo(6 + index * 5),
+      updated_at: hoursAgo(2 + index * 5),
+    };
+  });
   const demosApi = (init?: RequestInit, url?: string) => {
     if (init?.method === "POST") {
       if (mockMode === "demos-feedback-error") return new Response(JSON.stringify({ error: { detail: "Your feedback could not be delivered. Please try again." } }), { status: 502 });

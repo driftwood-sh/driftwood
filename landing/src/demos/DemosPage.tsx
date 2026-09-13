@@ -114,7 +114,7 @@ type StagingData = {
 
 type QueueData = { sends: SendRow[]; complete: boolean; loadingMore: boolean };
 /* The library, which Staging paints beside the review items. */
-type LibraryData = { rows: LibraryDemo[]; complete: boolean };
+type LibraryData = { rows: LibraryDemo[]; total: number; complete: boolean };
 type SentData = { sends: SendRow[]; total: number };
 
 /* Every control on the page that arms before it runs. One at a time, so
@@ -202,6 +202,14 @@ function firstWithRows(staging: number, queue: number, sent: number): Segment {
   if (queue > 0) return "queue";
   if (sent > 0) return "sent";
   return "staging";
+}
+
+/* Rows the list already holds stay put. Two loads of the same list can
+   overlap: a refresh racing the first read, or a remount. Without this the
+   later pages land twice and every count over them is double. */
+function mergeById<T>(prev: T[], rows: T[], idOf: (row: T) => string): T[] {
+  const seen = new Set(prev.map(idOf));
+  return [...prev, ...rows.filter((row) => !seen.has(idOf(row)))];
 }
 
 /* Pages of a list, first page painted before the rest arrives. */
@@ -307,7 +315,7 @@ export default function DemosPage() {
                   status: "ready",
                   data: {
                     ...prev.data,
-                    items: [...prev.data.items, ...rows],
+                    items: mergeById(prev.data.items, rows, (item) => item.id),
                     complete,
                     loadingMore: false,
                   },
@@ -335,11 +343,19 @@ export default function DemosPage() {
           return { rows: page.demos, total: page.total };
         },
         (row) => row.demo_id,
-        (rows, _total, complete) => setLibrary({ status: "ready", data: { rows, complete } }),
+        (rows, total, complete) =>
+          setLibrary({ status: "ready", data: { rows, total, complete } }),
         (rows, complete) =>
           setLibrary((prev) =>
             prev.status === "ready"
-              ? { status: "ready", data: { rows: [...prev.data.rows, ...rows], complete } }
+              ? {
+                  status: "ready",
+                  data: {
+                    ...prev.data,
+                    rows: mergeById(prev.data.rows, rows, (row) => row.demo_id),
+                    complete,
+                  },
+                }
               : prev,
           ),
       );
@@ -372,7 +388,11 @@ export default function DemosPage() {
             prev.status === "ready"
               ? {
                   status: "ready",
-                  data: { sends: [...prev.data.sends, ...rows], complete, loadingMore: false },
+                  data: {
+                    sends: mergeById(prev.data.sends, rows, (send) => send.id),
+                    complete,
+                    loadingMore: false,
+                  },
                 }
               : prev,
           ),
@@ -860,7 +880,15 @@ export default function DemosPage() {
     staging.data.complete &&
     library.status === "ready" &&
     library.data.complete;
-  const stagingCount = stagingLoaded ? stagedDemos.length : null;
+  /* What the library says it holds, against what actually arrived. They
+     differ when a page failed, or when a library is bigger than the page
+     guard fetches. Either way the list is short, and a short list carries a
+     line rather than a count that understates the work. */
+  const libraryTotal = library.status === "ready" ? library.data.total : 0;
+  const libraryLoaded = library.status === "ready" ? library.data.rows.length : 0;
+  const libraryShort =
+    library.status === "ready" && library.data.complete && libraryLoaded < libraryTotal;
+  const stagingCount = stagingLoaded && !libraryShort ? stagedDemos.length : null;
   /* One source still paging in. The list already paints; a whole-list action
      waits for the rest. */
   const stagingMore =
@@ -914,10 +942,21 @@ export default function DemosPage() {
         <>
           <div className="dp-bar is-bare">
             <div>
-              {stagingMore && (
+              {stagingMore ? (
                 <p className="dp-quiet" role="status">
                   Loading the rest.
+                  {library.status === "ready" && !library.data.complete &&
+                    ` ${libraryLoaded.toLocaleString()} of ${libraryTotal.toLocaleString()} demos so far.`}
                 </p>
+              ) : (
+                libraryShort && (
+                  /* The whole library did not fit, so the page says what it
+                     is showing instead of counting it wrong. */
+                  <p className="dp-quiet" role="status">
+                    Showing {libraryLoaded.toLocaleString()} of{" "}
+                    {libraryTotal.toLocaleString()} demos.
+                  </p>
+                )
               )}
             </div>
             {decidable.length > 1 && (
