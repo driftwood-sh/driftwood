@@ -1,39 +1,17 @@
-/* /dashboard/admin/drift — the drift-run node graph, per agent.
-
-   Agent pills come from /overview (every agent that has ever queued a run);
-   the graph draws the selected agent's runs as chains hanging off the task
-   hub, stages colored by what the judges actually said (drift_judgments),
-   topology from the task's flow.json manifest served in the overview.
-   Clicking a run or stage opens the detail rail, which fetches the full
-   judgment payloads (scores, transcripts) for that run. Polls every 15s
-   while any shown run is still active, like the Agents page. */
-
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppShell from "../dashboard/AppShell";
 import { LoggedOutView, ToastProvider } from "../dashboard/DashboardCommon";
 import { AdminPanelControls, ImpersonationBanner } from "../GodMode";
-import { CARD, relativeTime } from "../dashboard-shared";
 import {
   fetchAgentRuns,
   fetchOverview,
-  fetchRunDetail,
+  fetchPlans,
   type DriftOverview,
-  type DriftRunDetail,
+  type WorkflowPlan as Plan,
 } from "./api";
-import {
-  buildGraph,
-  classifyRun,
-  fitView,
-  layoutRadial,
-  relaxGraph,
-  runDuration,
-  terminalFor,
-  type StageStatus,
-  type DriftRun,
-  type FlowManifest,
-  type Graph,
-  type GraphNode,
-} from "./model";
+import type { DriftRun } from "./model";
+import WorkflowPlan from "./WorkflowPlan";
+import RunExplorer from "./RunExplorer";
 import "./drift.css";
 
 type User = {
@@ -44,553 +22,410 @@ type User = {
   is_admin?: boolean;
   impersonating?: boolean;
 };
-
-type AuthState = { status: "loading" } | { status: "denied" } | { status: "ok"; user: User };
-
-const ACTIVE_STATES = new Set(["queued", "launching", "running"]);
-
-/* Node stroke/fill from the design tokens only: ok green for pass/done,
-   alert red for failures (the sanctioned internal-dashboard exception),
-   tide for the agent/task/emissions, line-gray for anything neutral. */
-function nodeTone(n: GraphNode): "good" | "bad" | "tide" | "muted" {
-  if (n.type === "agent" || n.type === "task") return "tide";
-  if (n.type === "run" || n.type === "end")
-    return n.tone === "good" ? "good" : n.tone === "bad" ? "bad" : "muted";
-  const s = n.stageResult?.status;
-  if (s === "passed" || s === "retried") return "good";
-  if (s === "failed") return "bad";
-  return "tide";
-}
+type Auth =
+  | { status: "loading" }
+  | { status: "denied" }
+  | { status: "ok"; user: User };
 
 export default function Drift() {
-  const [auth, setAuth] = useState<AuthState>({ status: "loading" });
-
+  const [auth, setAuth] = useState<Auth>({ status: "loading" });
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/auth/me", { credentials: "include" });
-        if (cancelled) return;
-        if (res.ok) {
-          const user = (await res.json()) as User;
-          if (cancelled) return;
-          setAuth(user.is_admin ? { status: "ok", user } : { status: "denied" });
-        } else {
-          setAuth({ status: "denied" });
-        }
-      } catch {
-        if (!cancelled) setAuth({ status: "denied" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const controller = new AbortController();
+    fetch("/auth/me", { credentials: "include", signal: controller.signal })
+      .then(async (response) => {
+        const user: User | null = response.ok ? await response.json() : null;
+        if (!controller.signal.aborted)
+          setAuth(
+            user?.is_admin ? { status: "ok", user } : { status: "denied" },
+          );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAuth({ status: "denied" });
+      });
+    return () => controller.abort();
   }, []);
-
   return (
     <ToastProvider>
-      <div className="relative flex min-h-[100dvh] flex-col overflow-x-clip">
-        {auth.status === "loading" && (
-          <div className="flex flex-1 items-center justify-center text-sm text-ink-soft">
-            Checking access…
-          </div>
-        )}
-        {auth.status === "denied" && <LoggedOutView />}
-        {auth.status === "ok" && <DriftView user={auth.user} />}
-      </div>
+      {auth.status === "loading" ? (
+        <div className="workflow-loading" role="status">
+          Checking access…
+        </div>
+      ) : auth.status === "denied" ? (
+        <LoggedOutView />
+      ) : (
+        <DriftView user={auth.user} />
+      )}
     </ToastProvider>
   );
 }
 
 function DriftView({ user }: { user: User }) {
   const [overview, setOverview] = useState<DriftOverview | null>(null);
-  const [overviewLoaded, setOverviewLoaded] = useState(false);
-  const [agentId, setAgentId] = useState<string | null>(
+  const [agentId, setAgentId] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("agent"),
   );
-  const [runs, setRuns] = useState<DriftRun[] | null>(null);
-  const [shown, setShown] = useState(12);
-  const [detail, setDetail] = useState<DriftRunDetail | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const data = await fetchOverview();
-    setOverview(data);
-    setOverviewLoaded(true);
-    // Default to the busiest agent once the overview lands.
-    if (data?.agents.length) {
-      const busiest = [...data.agents].sort((a, b) => b.total - a.total)[0];
-      setAgentId((prev) => prev ?? busiest.agent_id);
-    }
+  const [error, setError] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pendingAgent, setPendingAgent] = useState<string | null>(null);
+  const handleDirty = useCallback((value: boolean) => {
+    setDirty(value);
+    if (!value) setPendingAgent(null);
   }, []);
-
-  // setTimeout(0) keeps the initial kick off the synchronous effect path
-  // (react-hooks/set-state-in-effect), same as Agents.tsx.
   useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(initial);
-  }, [load]);
-
-  const loadRuns = useCallback(async () => {
-    if (!agentId) return;
-    const page = await fetchAgentRuns(agentId, shown);
-    if (page) setRuns(page.runs);
-  }, [agentId, shown]);
-
-  useEffect(() => {
-    const initial = window.setTimeout(() => void loadRuns(), 0);
-    return () => window.clearTimeout(initial);
-  }, [loadRuns]);
-
-  // Poll while anything shown is still in flight.
-  useEffect(() => {
-    if (!runs?.some((r) => ACTIVE_STATES.has(r.state))) return;
-    const timer = setInterval(() => void loadRuns(), 15000);
-    return () => clearInterval(timer);
-  }, [runs, loadRuns]);
-
-  async function handleLogout() {
-    try {
-      await fetch("/auth/logout", { method: "POST", credentials: "include" });
-    } finally {
-      window.location.href = "/";
+    const controller = new AbortController();
+    fetchOverview(controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setOverview(data);
+        setError(null);
+        setAgentId((current) =>
+          data.agents.some((agent) => agent.agent_id === current)
+            ? current
+            : (data.agents.find((agent) => agent.agent_id === "photon")
+                ?.agent_id ??
+              data.agents[0]?.agent_id ??
+              null),
+        );
+      })
+      .catch((reason) => {
+        if (!controller.signal.aborted)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Workflows could not load.",
+          );
+      });
+    return () => controller.abort();
+  }, [refresh]);
+  function switchAgent(id: string) {
+    if (id === agentId || busy) return;
+    if (dirty) {
+      setPendingAgent(id);
+      return;
     }
+    changeAgent(id);
   }
-
-  const manifest: FlowManifest | null =
-    (runs?.length && overview?.flows[runs[0].task]) || null;
-  const tally = overview?.agents.find((a) => a.agent_id === agentId);
-
+  function changeAgent(id: string) {
+    setAgentId(id);
+    setPendingAgent(null);
+    setDirty(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set("agent", id);
+    window.history.replaceState(null, "", url);
+  }
+  async function logout() {
+    await fetch("/auth/logout", { method: "POST", credentials: "include" });
+    window.location.href = "/";
+  }
   return (
     <>
       {user.impersonating && <ImpersonationBanner email={user.email} />}
       <AppShell
         active="admin-drift"
         mode="admin"
-        identity={{ name: user.name || user.email, workspace: "Admin workspace", avatarUrl: user.avatar_url ?? undefined }}
-        onLogout={handleLogout}
+        identity={{
+          name: user.name || user.email,
+          workspace: "Admin workspace",
+          avatarUrl: user.avatar_url ?? undefined,
+        }}
+        onLogout={logout}
         adminControl={<AdminPanelControls inAdminPanel />}
       >
-        <div className="flex flex-col gap-4">
-          <header className="flex flex-wrap items-baseline gap-3">
-            <h1 className="text-xl font-semibold text-ink">Drift runs</h1>
-            <p className="text-sm text-ink-soft">
-              Every run an agent queued, its judge gates, and how it ended.
-            </p>
+        <div className="drift-workspace">
+          <header className="drift-heading">
+            <div>
+              <h1>Demo workflows</h1>
+              <p>Follow each step and guide what your demos will generate.</p>
+            </div>
+            {overview && (
+              <label className="workflow-agent-picker">
+                Agent
+                <select
+                  aria-label="Agent"
+                  disabled={busy}
+                  title={
+                    busy ? "Wait for the workflow save to finish." : undefined
+                  }
+                  value={agentId ?? ""}
+                  onChange={(event) => switchAgent(event.target.value)}
+                >
+                  {overview.agents.map((agent) => (
+                    <option key={agent.agent_id} value={agent.agent_id}>
+                      {agent.agent_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </header>
-
-          {overviewLoaded && (overview?.agents.length ?? 0) === 0 && (
-            <div className={`${CARD} p-6 text-sm text-ink-soft`}>
-              No drift runs yet. Runs appear here the moment an agent calls{" "}
-              <code>queue_drift_run</code>.
-            </div>
-          )}
-
-          {(overview?.agents.length ?? 0) > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {[...overview!.agents]
-                .sort((a, b) => b.total - a.total || a.agent_id.localeCompare(b.agent_id))
-                .map((a) => (
+          {pendingAgent && (
+            <div className="workflow-notice" role="alert">
+              <p>
+                You have unsaved changes. Save them before switching, or discard
+                this draft.
+              </p>
+              <div className="workflow-save-actions">
                 <button
-                  key={a.agent_id}
+                  className="workflow-button"
+                  onClick={() => setPendingAgent(null)}
+                >
+                  Keep editing
+                </button>
+                <button
+                  className="workflow-button"
                   onClick={() => {
-                    setAgentId(a.agent_id);
-                    setRuns(null);
-                    setDetail(null);
-                    setSelected(null);
+                    changeAgent(pendingAgent);
                   }}
-                  className={`drift-pill ${a.agent_id === agentId ? "is-active" : ""} ${a.total === 0 ? "is-empty" : ""}`}
                 >
-                  {a.agent_id}
-                  <span className="drift-pill-count">{a.total === 0 ? "no runs" : a.total}</span>
-                  {a.in_flight > 0 && <span className="drift-pill-live">{a.in_flight} live</span>}
+                  Discard and switch
                 </button>
-                ))}
+              </div>
             </div>
           )}
-
-          {tally && (
-            <div className="flex flex-wrap gap-2 text-xs text-ink-soft">
-              {Object.entries(tally.states)
-                .sort(([, a], [, b]) => b - a)
-                .map(([state, count]) => (
-                  <span key={state} className="drift-state-chip">
-                    <span className={`drift-dot ${chipTone(state)}`} />
-                    {count} {state.replace(/_/g, " ")}
-                  </span>
-                ))}
+          {error ? (
+            <div className="workflow-empty" role="alert">
+              <p>{error}</p>
+              <button
+                className="workflow-button"
+                onClick={() => setRefresh((value) => value + 1)}
+              >
+                Try again
+              </button>
             </div>
-          )}
-
-          {agentId && runs && runs.length > 0 && (
-            <div className="flex items-center gap-2 text-xs text-ink-soft">
-              showing latest
-              {[12, 25, 50].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setShown(n)}
-                  className={`drift-pill ${shown === n ? "is-active" : ""}`}
-                >
-                  {n}
-                </button>
-              ))}
-              runs
-            </div>
-          )}
-          {agentId && runs && runs.length > 0 && manifest && (
-            <FlowStrip
-              manifest={manifest}
-              run={selected ? (runs.find((r) => selected.startsWith(`run:${r.id}`)) ?? null) : null}
-            />
-          )}
-          {agentId && runs && runs.length > 0 && (
-            <GraphCanvas
-              key={`${agentId}:${runs.length}`}
+          ) : !overview ? (
+            <WorkflowSkeleton />
+          ) : agentId ? (
+            <AgentWorkspace
+              key={agentId}
               agentId={agentId}
-              runs={runs}
-              manifest={manifest}
-              selected={selected}
-              onSelect={(node) => {
-                if (!node?.run) {
-                  setSelected(null);
-                  setDetail(null);
-                  return;
-                }
-                setSelected(node.id);
-                void fetchRunDetail(node.run.id).then(setDetail);
-              }}
+              overview={overview}
+              onDirty={handleDirty}
+              onBusy={setBusy}
             />
-          )}
-          {agentId && runs && runs.length === 0 && (
-            <div className={`${CARD} p-6 text-sm text-ink-soft`}>
-              {agentId} hasn't queued any drift runs.
+          ) : (
+            <div className="workflow-empty">
+              <h2>No agents yet</h2>
+              <p>Workflows will appear when an agent is connected.</p>
             </div>
           )}
-
-          {selected && <DetailRail selectedId={selected} runs={runs ?? []} detail={detail} manifest={manifest} />}
         </div>
       </AppShell>
     </>
   );
 }
 
-/* The pipeline itself, drawn once above the graph: the task's stages from
-   flow.json, left to right. With no run selected it is the neutral legend
-   ("this is what every spoke walks through"); with a run selected it lights
-   up as that run's progress — green passed, amber retried, red where it
-   died, grey never reached — ending in the run's terminal chip. */
-function FlowStrip({
-  manifest,
-  run,
-}: {
-  manifest: FlowManifest;
-  run: DriftRun | null;
-}) {
-  const staged = run ? classifyRun(run, manifest) : null;
-  const terminal = run ? terminalFor(run, manifest) : null;
-  const tone = (status: StageStatus | null): string =>
-    status === "passed" || status === "emitted"
-      ? "tone-good"
-      : status === "retried"
-        ? "tone-retried"
-        : status === "failed"
-          ? "tone-bad"
-          : status === "unreached"
-            ? "tone-unreached"
-            : "tone-neutral";
-  return (
-    <div className={`${CARD} flow-strip`}>
-      <div className="flow-strip-title">
-        {run
-          ? `${String(run.parameters?.slug ?? run.task)} — how this run walked the flow`
-          : "The flow every run walks (click a run in the graph to trace it)"}
-      </div>
-      <div className="flow-strip-row">
-        {manifest.stages.map((stage, i) => {
-          const sr = staged?.[i] ?? null;
-          const retries = sr && sr.judgeCount > 1 ? ` ×${sr.judgeCount}` : "";
-          return (
-            <div key={stage.id} className="flow-strip-item">
-              <div className={`flow-strip-stage ${tone(sr ? sr.status : null)}`}>
-                <div className="flow-strip-name">
-                  {stage.name}
-                  {retries}
-                </div>
-                {stage.sub && <div className="flow-strip-sub">{stage.sub}</div>}
-                {sr && (
-                  <div className="flow-strip-verdict">
-                    {sr.status === "passed" && "gate passed"}
-                    {sr.status === "retried" && "passed after retries"}
-                    {sr.status === "failed" && "gate exhausted"}
-                    {sr.status === "emitted" && "recorded"}
-                    {sr.status === "unreached" && "never reached"}
-                  </div>
-                )}
-              </div>
-              <span className="flow-strip-arrow">→</span>
-            </div>
-          );
-        })}
-        <div
-          className={`flow-strip-stage flow-strip-terminal ${
-            terminal ? (terminal.tone === "good" ? "tone-good" : terminal.tone === "bad" ? "tone-bad" : "tone-neutral") : "tone-neutral"
-          }`}
-        >
-          <div className="flow-strip-name">{terminal ? terminal.label : "end state"}</div>
-          {!terminal && <div className="flow-strip-sub">done / quarantined / …</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function chipTone(state: string): string {
-  if (state === "done" || state === "already_done") return "is-good";
-  if (ACTIVE_STATES.has(state)) return "is-tide";
-  return "is-bad";
-}
-
-function GraphCanvas({
+function AgentWorkspace({
   agentId,
-  runs,
-  manifest,
-  selected,
-  onSelect,
+  overview,
+  onDirty,
+  onBusy,
 }: {
   agentId: string;
-  runs: DriftRun[];
-  manifest: FlowManifest | null;
-  selected: string | null;
-  onSelect: (node: GraphNode | null) => void;
+  overview: DriftOverview;
+  onDirty: (dirty: boolean) => void;
+  onBusy: (busy: boolean) => void;
 }) {
-  const graph: Graph = useMemo(() => {
-    const g = buildGraph(agentId, runs[0]?.task ?? "drift", runs, manifest);
-    layoutRadial(g);
-    return g;
-  }, [agentId, runs, manifest]);
-  // "run:<id>:" — the whole chain of the selected run (or the run node
-  // itself, without the trailing colon).
-  const selectedRunPrefix = selected ? selected.split(":").slice(0, 2).join(":") + ":" : null;
-
-  // Initial view fits the whole layout; the canvas remounts (see its key in
-  // DriftView) when the graph changes shape, so no refit effect is needed.
-  const [view, setView] = useState(() => fitView(graph, 1200, 720));
-  const [, force] = useState(0);
-  const drag = useRef<{ node: GraphNode | null; panning: boolean; px: number; py: number; moved: boolean }>({
-    node: null,
-    panning: false,
-    px: 0,
-    py: 0,
-    moved: false,
-  });
-
-  /* The elastic loop: run relaxGraph frames while a node is held or until
-     the graph settles back onto its radial homes. Started by pointer
-     handlers, self-stopping — no interval lives past the settle. */
-  const raf = useRef<number | null>(null);
-  const animate = useCallback(
-    function tick() {
-      raf.current = null;
-      const moving = relaxGraph(graph, drag.current.node?.id ?? null);
-      force((v) => v + 1);
-      if (moving > 0.08 || drag.current.node) raf.current = requestAnimationFrame(tick);
-    },
-    [graph],
-  );
-  const wake = useCallback(() => {
-    if (raf.current === null) raf.current = requestAnimationFrame(animate);
-  }, [animate]);
-  useEffect(
-    () => () => {
-      if (raf.current !== null) cancelAnimationFrame(raf.current);
-    },
-    [],
-  );
-  const svgRef = useRef<SVGSVGElement | null>(null);
-
-  /* Client coords -> viewBox coords (the svg has a viewBox, so CSS pixels
-     are scaled/centered) -> world coords under the pan/zoom transform. */
-  const toCanvas = (clientX: number, clientY: number) => {
-    const svg = svgRef.current!;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-    const pt = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
-    return { x: pt.x, y: pt.y };
-  };
-  const toWorld = (cx: number, cy: number) => ({ x: (cx - view.x) / view.k, y: (cy - view.y) / view.k });
-  const findNode = (mx: number, my: number): GraphNode | null => {
-    const p = toWorld(mx, my);
-    for (let i = graph.nodes.length - 1; i >= 0; i--) {
-      const n = graph.nodes[i];
-      if (Math.hypot(n.x - p.x, n.y - p.y) <= n.r + 4) return n;
-    }
-    return null;
-  };
-
+  const [plans, setPlans] = useState<Plan[] | null>(null);
+  const [runs, setRuns] = useState<DriftRun[] | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [view, setView] = useState("plan");
+  const [refresh, setRefresh] = useState(0);
+  const [limit, setLimit] = useState(25);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchPlans(agentId, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setPlans(data.plans);
+          setPlanError(null);
+        }
+      })
+      .catch((reason) => {
+        if (!controller.signal.aborted)
+          setPlanError(
+            reason instanceof Error
+              ? reason.message
+              : "The workflow plan could not load.",
+          );
+      });
+    return () => controller.abort();
+  }, [agentId, refresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () =>
+      fetchAgentRuns(agentId, limit, controller.signal)
+        .then((data) => {
+          if (!controller.signal.aborted) {
+            setRuns(data.runs);
+            setRunError(null);
+          }
+        })
+        .catch((reason) => {
+          if (!controller.signal.aborted)
+            setRunError(
+              reason instanceof Error
+                ? reason.message
+                : "Run history could not load.",
+            );
+        });
+    void load();
+    const timer = setInterval(() => {
+      if (!document.hidden) void load();
+    }, 15000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [agentId, limit, refresh]);
   return (
-    <div className={`${CARD} drift-canvas-card`}>
-      <svg
-        ref={svgRef}
-        className="drift-canvas"
-        viewBox="0 0 1200 720"
-        onPointerDown={(e) => {
-          const { x: mx, y: my } = toCanvas(e.clientX, e.clientY);
-          const n = findNode(mx, my);
-          drag.current = { node: n && n.type !== "agent" ? n : null, panning: !n, px: mx, py: my, moved: false };
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerMove={(e) => {
-          const { x: mx, y: my } = toCanvas(e.clientX, e.clientY);
-          const d = drag.current;
-          if (d.node) {
-            const p = toWorld(mx, my);
-            d.node.x = p.x;
-            d.node.y = p.y;
-            d.node.vx = 0;
-            d.node.vy = 0;
-            d.moved = true;
-            wake();
-          } else if (d.panning && (e.buttons & 1) === 1) {
-            setView((v) => ({ ...v, x: v.x + (mx - d.px), y: v.y + (my - d.py) }));
-            d.px = mx;
-            d.py = my;
-            d.moved = true;
-          }
-        }}
-        onPointerUp={(e) => {
-          const d = drag.current;
-          if (!d.moved) {
-            const { x: mx, y: my } = toCanvas(e.clientX, e.clientY);
-            onSelect(findNode(mx, my));
-          }
-          if (d.node) wake();
-          drag.current = { node: null, panning: false, px: 0, py: 0, moved: false };
-        }}
-        onWheel={(e) => {
-          const { x: mx, y: my } = toCanvas(e.clientX, e.clientY);
-          const f = Math.exp(-e.deltaY * 0.0015);
-          setView((v) => ({ x: mx - (mx - v.x) * f, y: my - (my - v.y) * f, k: v.k * f }));
+    <>
+      <div
+        className="workflow-tabs"
+        role="tablist"
+        aria-label="Workflow views"
+        onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+            return;
+          event.preventDefault();
+          const next =
+            event.key === "Home"
+              ? "plan"
+              : event.key === "End"
+                ? "runs"
+                : view === "plan"
+                  ? "runs"
+                  : "plan";
+          setView(next);
+          document
+            .getElementById(next === "plan" ? "plan-tab" : "runs-tab")
+            ?.focus();
         }}
       >
-        <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-          {graph.edges.map((e, i) => {
-            const a = graph.byId.get(e.a)!;
-            const b = graph.byId.get(e.b)!;
-            const inChain =
-              selectedRunPrefix !== null &&
-              (e.a.startsWith(selectedRunPrefix) || e.b.startsWith(selectedRunPrefix) || e.b === selectedRunPrefix.slice(0, -1));
-            return (
-              <line
-                key={i}
-                className={`drift-edge ${e.spine ? "is-spine" : ""} ${selectedRunPrefix && !inChain ? "is-dimmed" : ""}`}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-              />
-            );
-          })}
-          {graph.nodes.map((n) => {
-            const inChain =
-              selectedRunPrefix === null ||
-              n.id.startsWith(selectedRunPrefix) ||
-              n.id === selectedRunPrefix.slice(0, -1) ||
-              n.type === "agent" ||
-              n.type === "task";
-            // Stage labels once zoomed in, or along the selected run's whole
-            // chain — the trace you clicked should read end to end.
-            const showLabel =
-              n.type !== "stage" || view.k >= 0.9 || (selectedRunPrefix !== null && n.id.startsWith(selectedRunPrefix));
-            return (
-              <g key={n.id} className={`drift-node tone-${nodeTone(n)} ${selected === n.id ? "is-selected" : ""} ${!inChain ? "is-dimmed" : ""}`}>
-                <circle cx={n.x} cy={n.y} r={n.r}>
-                  <title>{n.label}</title>
-                </circle>
-                {showLabel && (
-                  <text
-                    className={n.type === "agent" || n.type === "task" ? "drift-label-big" : n.type === "run" ? "drift-label-run" : "drift-label"}
-                    x={n.x}
-                    y={n.type === "agent" ? n.y + n.r + 15 : n.y - n.r - 5}
-                    textAnchor="middle"
-                    // Counter-scale so text stays readable at the fitted zoom.
-                    style={{ fontSize: `${Math.min(((n.type === "agent" || n.type === "task" ? 13 : n.type === "run" ? 12 : 11) / view.k) * 0.9, 26)}px` }}
-                  >
-                    {n.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
-      <p className="drift-canvas-hint">drag nodes · drag background to pan · scroll to zoom · click a run or stage for detail</p>
-    </div>
+        <button
+          id="plan-tab"
+          role="tab"
+          tabIndex={view === "plan" ? 0 : -1}
+          aria-selected={view === "plan"}
+          aria-controls="workflow-plan-panel"
+          onClick={() => setView("plan")}
+        >
+          Workflow plan
+        </button>
+        <button
+          id="runs-tab"
+          role="tab"
+          tabIndex={view === "runs" ? 0 : -1}
+          aria-selected={view === "runs"}
+          aria-controls="workflow-runs-panel"
+          onClick={() => setView("runs")}
+        >
+          Run history
+        </button>
+      </div>
+      <div
+        id="workflow-plan-panel"
+        role="tabpanel"
+        aria-labelledby="plan-tab"
+        hidden={view !== "plan"}
+      >
+        {planError ? (
+          <div className="workflow-empty" role="alert">
+            <p>{planError}</p>
+            <button
+              className="workflow-button"
+              onClick={() => setRefresh((value) => value + 1)}
+            >
+              Try again
+            </button>
+          </div>
+        ) : plans === null ? (
+          <WorkflowSkeleton />
+        ) : plans.length ? (
+          plans.map((plan) => (
+            <WorkflowPlan
+              key={`${agentId}:${plan.task}`}
+              agentId={agentId}
+              plan={plan}
+              onDirty={onDirty}
+              onBusy={onBusy}
+            />
+          ))
+        ) : (
+          <div className="workflow-empty">
+            <h2>No editable plan yet</h2>
+            <p>
+              The first editing surface is available for Photon demos. You can
+              still follow this agent’s runs step by step.
+            </p>
+            <button className="workflow-button" onClick={() => setView("runs")}>
+              View run history
+            </button>
+          </div>
+        )}
+      </div>
+      <div
+        id="workflow-runs-panel"
+        role="tabpanel"
+        aria-labelledby="runs-tab"
+        hidden={view !== "runs"}
+      >
+        {runError ? (
+          <div className="workflow-empty" role="alert">
+            <p>{runError}</p>
+            <button
+              className="workflow-button"
+              onClick={() => setRefresh((value) => value + 1)}
+            >
+              Try again
+            </button>
+          </div>
+        ) : runs === null ? (
+          <WorkflowSkeleton />
+        ) : (
+          <>
+            <div className="workflow-history-heading">
+              <span>
+                Latest {runs.length} {runs.length === 1 ? "run" : "runs"}
+              </span>
+              <label>
+                Show
+                <select
+                  value={limit}
+                  onChange={(event) => setLimit(Number(event.target.value))}
+                >
+                  <option value={25}>25 runs</option>
+                  <option value={50}>50 runs</option>
+                  <option value={100}>100 runs</option>
+                </select>
+              </label>
+            </div>
+            <RunExplorer runs={runs} flows={overview.flows} />
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
-function DetailRail({
-  selectedId,
-  runs,
-  detail,
-  manifest,
-}: {
-  selectedId: string;
-  runs: DriftRun[];
-  detail: DriftRunDetail | null;
-  manifest: FlowManifest | null;
-}) {
-  const runId = selectedId.replace(/^run:/, "").split(":")[0];
-  const run = runs.find((r) => r.id === runId);
-  if (!run) return null;
-  const slug = String(run.parameters?.slug ?? "") || run.task;
-  const t = terminalFor(run, manifest);
-  const demoUrl = typeof run.result?.demo_url === "string" ? run.result.demo_url : null;
-  const stageId = selectedId.includes(":") ? selectedId.split(":").slice(2).join(":") : null;
-  const shown = detail?.id === run.id ? detail.judgments : run.judgments.map((j) => ({ ...j, detail: null }));
-
+function WorkflowSkeleton() {
   return (
-    <div className={`${CARD} p-4`}>
-      <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-base font-semibold text-ink">{slug}</h2>
-        <span className={`drift-state-chip ${t.tone === "good" ? "is-good" : t.tone === "bad" ? "is-bad" : "is-tide"}`}>
-          <span className={`drift-dot ${t.tone === "good" ? "is-good" : t.tone === "bad" ? "is-bad" : "is-tide"}`} />
-          {t.label}
-        </span>
-        <span className="text-xs text-ink-soft">
-          queued {relativeTime(run.created_at) ?? "—"}
-          {runDuration(run) ? ` · ran ${runDuration(run)}` : ""}
-        </span>
-        {demoUrl && (
-          <a className="text-xs font-medium text-tide underline" href={demoUrl} target="_blank" rel="noreferrer">
-            demo page ↗
-          </a>
-        )}
+    <div
+      className="workflow-skeleton"
+      role="status"
+      aria-label="Loading workflow"
+    >
+      <div />
+      <div className="workflow-skeleton-columns">
+        <div>
+          {[1, 2, 3, 4, 5, 6].map((id) => (
+            <span key={id} />
+          ))}
+        </div>
+        <div />
       </div>
-      <ul className="mt-3 flex flex-col gap-2">
-        {shown.map((j, i) => (
-          <li key={i} className="text-xs">
-            <div className="flex items-center gap-2">
-              <span className={`drift-dot ${j.passed === true ? "is-good" : j.passed === false ? "is-bad" : "is-tide"}`} />
-              <code className="rounded bg-sand px-1.5 py-0.5">{j.label}</code>
-              <span className={j.passed === true ? "font-semibold text-ok" : j.passed === false ? "font-semibold text-alert" : "text-ink-soft"}>
-                {j.passed === true ? "pass" : j.passed === false ? "fail" : "info"}
-              </span>
-              <span className="text-ink-faint">{relativeTime(j.created_at)}</span>
-            </div>
-            {"detail" in j && j.detail != null && (
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-sand p-2 text-[11px] leading-snug text-ink-soft">
-                {JSON.stringify(j.detail, null, 1).slice(0, 4000)}
-              </pre>
-            )}
-          </li>
-        ))}
-        {shown.length === 0 && (
-          <li className="text-xs text-ink-soft">
-            No judgments recorded — this run ended before its flow emitted anything
-            {stageId ? "" : "."}
-          </li>
-        )}
-      </ul>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { photonPlan } from "./drift/mock-plan.ts";
 import { parsePolicy, reviewerFor, type ApprovalMode, type ApprovalPolicy } from "./approvals/model.ts";
 import { initializeMockMode, mockBlockedResponse } from "./mock-mode.ts";
 import { resendRefusalMessage, resendWaitMinutes } from "./team/team-model.ts";
@@ -2026,16 +2027,42 @@ if (mockMode) {
       ],
     },
   ];
+  let currentPhotonPlan = structuredClone(photonPlan);
+  const photonFlow = {
+    task: "photon_demo",
+    stages: photonPlan.stages.map(stage => ({
+      id: stage.id, name: stage.name, sub: stage.output, gate: stage.gate,
+      judge_prefixes: ["research", "story", "demo"].includes(stage.id) ? [`${stage.id}-`] : [],
+    })),
+    terminals: { done: { label: "Demo completed", tone: "good" } },
+  };
+  driftRunRows.push({
+    ...driftRunRows[0], id: "44444444-4444-4444-8444-444444444444",
+    agent_id: "photon", task: "photon_demo",
+    parameters: { company_name: "Sample company", slug: "sample-company" },
+    judgments: [driftJudgment("research-1-scores", true, 120), driftJudgment("story-1-scores", false, 118), driftJudgment("story-2-scores", true, 115), driftJudgment("demo-1-scores", true, 110)],
+  });
+  const driftPlans = async (init?: RequestInit) => {
+    if (init?.method !== "PUT") return { plans: [currentPhotonPlan] };
+    const body = JSON.parse(String(init.body));
+    if (body.version !== currentPhotonPlan.version) return Response.json({ error: { code: "workflow_changed", detail: "This workflow changed. Reload it before saving your changes." } }, { status: 409 });
+    const fields = currentPhotonPlan.fields.map(field => ({ ...field, value: body.changes[field.id] ?? field.value }));
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(fields)));
+    currentPhotonPlan = { ...currentPhotonPlan, fields, version: Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, "0")).join("") };
+    return { plan: currentPhotonPlan, notification_delivered: true };
+  };
   const driftOverview = {
     refreshed_at: new Date().toISOString(),
     agents: [
+      { agent_id: "photon", states: { done: 1 }, total: 1, in_flight: 0 },
       { agent_id: "autosana", states: { done: 1, quarantined: 1, running: 1 }, total: 3, in_flight: 1 },
       { agent_id: "oruk", states: {}, total: 0, in_flight: 0 },
     ],
-    flows: { behavior_ci_demo: driftFlow },
-    tasks: ["behavior_ci_demo"],
+    flows: { behavior_ci_demo: driftFlow, photon_demo: photonFlow },
+    tasks: ["behavior_ci_demo", "photon_demo"],
   };
   const driftAgentRuns = (_init?: RequestInit, url?: string) => {
+    if (url?.includes("/plans")) return { plans: [] };
     const agentId = decodeURIComponent(url?.split("/agents/")[1]?.split("/")[0]?.split("?")[0] ?? "");
     return {
       agent_id: agentId,
@@ -2689,6 +2716,7 @@ if (mockMode) {
     ["/api/v1/admin/agents/fleet", fleetPage],
     ["/api/v1/admin/agents/", mutateAgent],
     ["/api/v1/admin/drift/overview", driftOverview],
+    ["/api/v1/admin/drift/agents/photon/plans", driftPlans],
     ["/api/v1/admin/drift/agents/", driftAgentRuns],
     ["/api/v1/admin/drift/runs/", driftRunDetail],
     ["/api/v1/admin/probes/dashboard", probesNotFound],

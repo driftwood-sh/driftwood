@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "node --test 'src/**/*.test.ts'",
     "test:demos": "node scripts/test-demo-feedback.mjs",
+    "test:drift": "node scripts/test-drift-workflow.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

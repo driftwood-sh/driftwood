@@ -98,6 +98,30 @@ Chromium and iPhone WebKit. `DEMO_TEST_SCREENSHOTS` optionally captures the
 feedback states; `DEMO_TEST_WEBKIT_PATH` selects an installed WebKit executable.
 Mock feedback never sends a Slack message.
 
+## Admin demo workflows
+
+`/dashboard/admin/drift` is the platform-admin-only workflow editor. Photon’s
+plan shows six ordered steps and the output of each one, with creative
+direction controls for research, story, artwork and presentation. The story
+outline describes the planned structure; it is not a generated demo preview.
+The script and base prompts stay on the server. Saves apply to future runs
+in the selected agent’s workspace and do not generate a demo immediately.
+
+Run history uses the same ordered layout with review results and corrections.
+Unrecorded steps stay explicitly unrecorded. Other agents keep their existing
+process maps; the first editable plan is Photon only.
+
+Drafts survive tab changes and failed saves. Switching agents asks before
+discarding edits. Version conflicts offer an explicit discard-and-reload path;
+the editor never silently overwrites another admin’s changes.
+
+Preview `/dashboard/admin/drift?mock=admin`. Run `npm run test:drift` against
+a built preview on port 5182 (`DRIFT_TEST_BASE_URL` overrides it). The script
+checks Chromium and iPhone WebKit, saves, conflicts, drafts, access, keyboard
+navigation and accessibility. `DRIFT_TEST_SCREENSHOTS` captures evidence;
+`DRIFT_TEST_WEBKIT_EXECUTABLE` selects an installed WebKit binary. Mock saves
+stay in memory and never call the backend or Slack.
+
 ## Quality gate
 
 ```bash

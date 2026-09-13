@@ -32,23 +32,95 @@ export type DriftRunDetail = Omit<DriftRun, "judgments"> & {
   judgments: JudgmentFull[];
 };
 
-async function get<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(path, { credentials: "include" });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as T;
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
+export class WorkflowError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.code = code;
   }
 }
 
-export const fetchOverview = () => get<DriftOverview>("/api/v1/admin/drift/overview");
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "include",
+    cache: "no-store",
+    ...init,
+  });
+  if (!res.ok) {
+    let message = "This view could not load. Please try again.";
+    let code = "request_failed";
+    try {
+      const body = await res.json();
+      if (typeof body.error?.detail === "string") message = body.error.detail;
+      if (typeof body.error?.code === "string") code = body.error.code;
+    } catch {
+      /* Keep an actionable proxy error. */
+    }
+    throw new WorkflowError(message, code);
+  }
+  return res.json() as Promise<T>;
+}
 
-export const fetchAgentRuns = (agentId: string, limit = 25) =>
-  get<DriftAgentRunsPage>(
+export const fetchOverview = (signal?: AbortSignal) =>
+  request<DriftOverview>("/api/v1/admin/drift/overview", { signal });
+
+export const fetchAgentRuns = (
+  agentId: string,
+  limit = 25,
+  signal?: AbortSignal,
+) =>
+  request<DriftAgentRunsPage>(
     `/api/v1/admin/drift/agents/${encodeURIComponent(agentId)}/runs?limit=${limit}`,
+    { signal },
   );
 
-export const fetchRunDetail = (runId: string) =>
-  get<DriftRunDetail>(`/api/v1/admin/drift/runs/${encodeURIComponent(runId)}`);
+export const fetchRunDetail = (runId: string, signal?: AbortSignal) =>
+  request<DriftRunDetail>(
+    `/api/v1/admin/drift/runs/${encodeURIComponent(runId)}`,
+    { signal },
+  );
+
+export type PlanStage = {
+  id: string;
+  name: string;
+  description: string;
+  output: string;
+  gate: boolean;
+};
+export type PlanField = {
+  id: string;
+  stage_id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  max_length: number;
+};
+export type WorkflowPlan = {
+  task: string;
+  title: string;
+  description: string;
+  version: string;
+  editable: boolean;
+  unavailable_reason: string | null;
+  output: Record<string, string>;
+  stages: PlanStage[];
+  fields: PlanField[];
+};
+export const fetchPlans = (agentId: string, signal?: AbortSignal) =>
+  request<{ plans: WorkflowPlan[] }>(
+    `/api/v1/admin/drift/agents/${encodeURIComponent(agentId)}/plans`,
+    { signal },
+  );
+export const savePlan = (
+  agentId: string,
+  plan: WorkflowPlan,
+  changes: Record<string, string>,
+) =>
+  request<{ plan: WorkflowPlan; notification_delivered: boolean }>(
+    `/api/v1/admin/drift/agents/${encodeURIComponent(agentId)}/plans/${encodeURIComponent(plan.task)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: plan.version, changes }),
+    },
+  );
