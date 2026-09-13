@@ -61,6 +61,9 @@ if (mockMode) {
   if (import.meta.env.DEV && params.has("facecamera")) installCaptureFixture(params.get("facecamera")!);
   params.set("mock", mockMode);
   const hoursAgo = (h: number) => new Date(Date.now() - h * 3600e3).toISOString();
+  /* The two fixtures whose whole point is a workspace with demos made and
+     nothing pending or scheduled: Staging is fed by the library alone. */
+  const libraryIsTheWorkspace = mockMode === "library-only" || mockMode === "photon-shaped";
   /* The workspace role the fixture reports, for /auth/me and for the Team
      page. `?mock=admin` already means the internal-admin chrome (is_admin
      below), so the workspace-admin preview takes its own value:
@@ -665,7 +668,7 @@ if (mockMode) {
   const sendsApi = (_init?: RequestInit, url?: string) => {
     const params = new URL(url ?? "", location.origin).searchParams;
     /* Nothing queued and nothing sent, so Queue and Sent are both empty. */
-    if (mockMode === "library-only")
+    if (libraryIsTheWorkspace)
       return { sends: [], total: 0, limit: 100, offset: 0, counts: { pending: 0, pending_sends: 0, pending_system: 0, sent: 0 }, kind_counts: {} };
     if (params.get("view") !== "sent")
       return {
@@ -856,7 +859,7 @@ if (mockMode) {
     const offset = Number(query.get("offset") ?? 0), limit = Number(query.get("limit") ?? 100);
     /* The library-only workspace has nothing pending: that is the whole point
        of the fixture. */
-    const pending = mockMode === "library-only" ? [] : reviews.pending.filter((row) => row.status === "pending");
+    const pending = libraryIsTheWorkspace ? [] : reviews.pending.filter((row) => row.status === "pending");
     return {...reviews,pending:pending.slice(offset,offset+limit).map((row) => ({...row,...reviewPermissions(row)})),total_pending:pending.length,offset,limit};
   };
   const decideReviews = (init?: RequestInit) => {
@@ -2650,6 +2653,94 @@ if (mockMode) {
       updated_at: hoursAgo(2 + index * 5),
     };
   });
+  /* ?mock=photon-shaped — one workspace's library as production held it on
+     2026-09-12. 60 companies arrive from the private-run source, each named
+     "<company> (<domain>)", and 11 of those companies arrive a SECOND time as
+     a lead-linked hosted video registered under the bare company name. The
+     endpoint served all 71 rows until it learned to merge them by company, so
+     this fixture is the answer Staging has to survive on its own: one card per
+     company, whatever the library hands over. 50 rows a page. */
+  type LibraryRow = {
+    demo_id: string;
+    lead_id: string | null;
+    lead_name: string | null;
+    company_name: string;
+    description: string | null;
+    artifact_id: string;
+    name: string;
+    content_type: string;
+    content_url: string;
+    created_at: string;
+    updated_at: string;
+  };
+  const photonRunCompanies = [
+    "a0.dev (a0.dev)", "Agent FM (agentfm.ai)", "Agoda (agoda.com)",
+    "Airbnb (airbnb.com)", "Bilt (biltrewards.com)", "Bloom (bloom.diy)",
+    "Bookaway (bookaway.com)", "Booking.com (booking.com)",
+    "Callbook AI (callbook.ai)", "Clay (clay.com)",
+    "ClickFunnels (clickfunnels.com)", "Compass (compass.com)",
+    "cozycozy (cozycozy.com)", "CreativeMode (creativemode.net)",
+    "Emergent (emergent.sh)", "Euno (enterprise AI context platform)",
+    "Expedia (expedia.com)", "Fanbasis (fanbasis.com)",
+    "Fastshot (fastshot.ai)", "FlixBus (flixbus.com)",
+    "GetYourGuide (getyourguide.com)", "Giga (giga.ai)",
+    "Google Flights (google.com)", "Hoplite (hoplite.sh)",
+    "Hopper (hopper.com)", "Hostelworld (hostelworld.com)",
+    "Hotels.com (hotels.com)", "HYROS (hyros.com)",
+    "Illume (illumelabs.ai)", "Kino (kino.ai)", "Klook (klook.com)",
+    "Lety.ai", "Lindy (lindy.ai)", "Magic Hour (magichour.ai)",
+    "MailTime (mailtime.com)", "Meta (WhatsApp)", "Odo (useodo.com)",
+    "Ollie (ollie.ai)", "Omio (omio.com)", "OpenTag (tryopentag.com)",
+    "Palette (palettelabs.com)",
+    "Paperclip Labs Inc. (Paperclip app for managing AI agents)",
+    "Pika (pika.art)", "Priceline (priceline.com)", "Rational (rational.to)",
+    "Rence (rence.ai)", "screenpipe (screenpipe.com)",
+    "Skyscanner (skyscanner.com)", "Tiqets (tiqets.com)",
+    "Trainline (thetrainline.com)", "Traveloka (traveloka.com)", "Trip.com",
+    "Tripadvisor (tripadvisor.com)", "TripIt (tripit.com)",
+    "trivago (trivago.com)", "Trope (trope.ai)", "Viator (viator.com)",
+    "Vrbo (vrbo.com)", "Wanderlog (wanderlog.com)", "Wanderu (wanderu.com)",
+  ];
+  /* The 11 registered twice. The first six were recorded AFTER the run that
+     registered the same company and the last five BEFORE it, so the fixture
+     also says which copy of a company the page is supposed to keep. */
+  const photonLeadCompanies = [
+    "Airbnb", "Bookaway", "Booking.com", "FlixBus", "Hostelworld", "Omio",
+    "Skyscanner", "Tripadvisor", "TripIt", "Wanderlog", "Wanderu",
+  ];
+  const photonRows: LibraryRow[] = [
+    ...photonRunCompanies.map((company, index) => ({
+      demo_id: `html:${String(index + 1).padStart(32, "0")}`,
+      lead_id: null,
+      lead_name: null,
+      company_name: company,
+      description: index % 2 === 0 ? "The checkout step that drops a booking." : null,
+      artifact_id: `photon-run-artifact-${index}`,
+      name: `${company} demo`,
+      content_type: "video/mp4",
+      content_url: ["/case-autosana.mp4", "/compare.mp4", "/case-oruk.mp4", "/demo-portrait.mp4"][index % 4],
+      created_at: hoursAgo(6 + index * 5),
+      updated_at: hoursAgo(5 + index * 5),
+    })),
+    ...photonLeadCompanies.map((company, index) => {
+      const hours = index < 6 ? 1 + index : 900 + index;
+      return {
+        demo_id: `photon-lead-${index}`,
+        lead_id: `photon-lead-${index}`,
+        lead_name: null,
+        company_name: company,
+        description: null,
+        artifact_id: `photon-lead-artifact-${index}`,
+        name: `${company.toLowerCase()}-walkthrough`,
+        content_type: "video/mp4",
+        content_url: "/compare.mp4",
+        created_at: hoursAgo(hours),
+        updated_at: hoursAgo(hours),
+      };
+    }),
+    /* Newest first, the order the endpoint serves, so a page of this fixture
+       holds the same rows the real one would. */
+  ].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const demosApi = (init?: RequestInit, url?: string) => {
     if (init?.method === "POST") {
       if (mockMode === "demos-feedback-error") return new Response(JSON.stringify({ error: { detail: "Your feedback could not be delivered. Please try again." } }), { status: 502 });
@@ -2660,7 +2751,12 @@ if (mockMode) {
     const q = (query.get("q") ?? "").toLowerCase();
     const limit = Number(query.get("limit") ?? 12);
     const offset = Number(query.get("offset") ?? 0);
-    const library = mockMode === "library-only" ? libraryOnlyRows : demoRows;
+    const library: LibraryRow[] =
+      mockMode === "library-only"
+        ? libraryOnlyRows
+        : mockMode === "photon-shaped"
+          ? photonRows
+          : demoRows;
     const rows = mockMode === "demos-empty" ? [] : library.filter((demo) => `${demo.company_name} ${demo.lead_name} ${demo.name}`.toLowerCase().includes(q));
     return { demos: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
   };

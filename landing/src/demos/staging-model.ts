@@ -182,6 +182,97 @@ export function stagedFromLibrary(row: LibraryDemo): StagedDemo {
   };
 }
 
+/* ---------- one card per company ---------- */
+
+/* Whatever made a demo names its company its own way. A private run writes
+   the domain into the name — "Airbnb (airbnb.com)" — and a lead-linked video
+   writes the bare "Airbnb". Two names, one company, and the customer is owed
+   one card for it.
+
+   These three functions are the same reduction the endpoint makes in
+   app/db/demos.py (_domain, _company_identity, company_key), on the one field
+   the endpoint hands over: the company name. Keeping them in step matters,
+   because either side alone can hand the page two rows for one company. */
+
+const DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+/* The domain a string names, or null when it names none. "Airbnb" is a name;
+   "airbnb.com" is a domain, and so is "https://www.airbnb.com/". */
+function demoDomain(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/$/, "");
+  return DOMAIN.test(normalized) ? normalized : null;
+}
+
+/* A company name as a key, plus the domain it carries when it carries one. A
+   trailing "(airbnb.com)" is domain evidence and comes off the name; a
+   trailing "(WhatsApp)" is part of the name and stays. */
+export function companyIdentity(name: string): { key: string; domain: string | null } {
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, " ");
+  const hint = demoDomain(/\(([^()]+)\)$/.exec(normalized)?.[1] ?? "");
+  return {
+    key: hint ? normalized.replace(/\s*\([^()]+\)$/, "").trim() : normalized,
+    domain: hint ?? demoDomain(normalized),
+  };
+}
+
+/* What each row counts as, in the order the rows came in.
+
+   A bare name resolves to a domain another row proves, and only when every
+   row that names a domain for that name names the SAME one: namesakes on
+   different sites are different companies and stay apart.
+
+   A demo made for a named person is that person's demo, not the company's.
+   The endpoint keeps one of those per lead on purpose, so they keep their own
+   identity here too — merging them would hide work. */
+export function companyKeys(rows: LibraryDemo[]): string[] {
+  const identities = rows.map((row) => companyIdentity(row.company_name));
+  const domains = new Map<string, Set<string>>();
+  for (const { key, domain } of identities) {
+    if (!domain) continue;
+    const seen = domains.get(key) ?? new Set<string>();
+    seen.add(domain);
+    domains.set(key, seen);
+  }
+  return identities.map(({ key, domain }, index) => {
+    const person = rows[index].lead_name?.trim();
+    if (person) return `lead:${rows[index].lead_id ?? rows[index].demo_id}`;
+    const seen = domains.get(key);
+    const resolved = domain ?? (seen?.size === 1 ? [...seen][0] : null);
+    return resolved ? `domain:${resolved}` : `name:${key}`;
+  });
+}
+
+/* A timestamp as a number. Two sources write the same instant two ways, so
+   the strings are parsed rather than compared. */
+function stamp(value: string): number {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+/* One row per company, and the most recent one. A tie falls to the demo id,
+   so the same library never paints two ways. */
+export function latestPerCompany(rows: LibraryDemo[]): LibraryDemo[] {
+  const keys = companyKeys(rows);
+  const latest = new Map<string, number>();
+  rows.forEach((row, index) => {
+    const held = latest.get(keys[index]);
+    if (held === undefined) {
+      latest.set(keys[index], index);
+      return;
+    }
+    const order = stamp(row.created_at) - stamp(rows[held].created_at);
+    if (order > 0 || (order === 0 && row.demo_id.localeCompare(rows[held].demo_id) > 0))
+      latest.set(keys[index], index);
+  });
+  const kept = new Set(latest.values());
+  return rows.filter((_, index) => kept.has(index));
+}
+
 /* Staging, from both of its sources, as one list.
 
    A demo that exists and is neither queued nor sent is staged, whether or not
@@ -189,6 +280,11 @@ export function stagedFromLibrary(row: LibraryDemo): StagedDemo {
    the library carries the rest. A demo in both sources is one demo, and the
    review item wins it, because that copy has the email on it. The pair is
    recognised by the lead it is for, or by the demo's own slug.
+
+   The library can also hold one company twice on its own — the same company
+   registered by a run and by a lead-linked video, under two spellings of its
+   name — and a customer reading the page counts companies, not
+   registrations. One company, one card, the newest kept.
 
    Newest first, across both sources: the work done today is the work a
    customer opens the page to see. */
@@ -208,9 +304,11 @@ export function stagedWithLibrary(
     if (send.lead) leads.add(send.lead.lead_id);
     if (send.attachment_slug) slugs.add(send.attachment_slug);
   }
-  const rest = library
-    .filter((row) => !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name))
-    .map(stagedFromLibrary);
+  const rest = latestPerCompany(
+    library.filter(
+      (row) => !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name),
+    ),
+  ).map(stagedFromLibrary);
   return [...staged, ...rest].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

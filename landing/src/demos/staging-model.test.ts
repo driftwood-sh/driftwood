@@ -24,6 +24,9 @@ import {
   laterSummary,
   splitQueueDays,
   stagedWithLibrary,
+  companyIdentity,
+  companyKeys,
+  latestPerCompany,
   timestampLabel,
   videoSeconds,
   sendingAccount,
@@ -506,12 +509,136 @@ test("both sources run newest first, because today's work is what a customer ope
     staged,
     [
       libraryRow({ demo_id: "newest", created_at: "2026-09-12T09:00:00Z" }),
-      libraryRow({ demo_id: "middle", created_at: "2026-09-10T09:00:00Z" }),
+      /* Another company: two demos of ONE company are one card, which the
+         tests below cover, so this pair has to be two companies to be two. */
+      libraryRow({ demo_id: "middle", company_name: "Omio", created_at: "2026-09-10T09:00:00Z" }),
     ],
     [],
   );
   assert.deepEqual(
     demos.map((demo) => demo.key),
     ["library:newest", "library:middle", "lead:l1"],
+  );
+});
+
+test("one company is one card, and the newest demo of it is the one kept", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "html:run",
+        company_name: "airbnb (airbnb.com)",
+        created_at: "2026-09-10T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "lead-row",
+        lead_id: "l9",
+        company_name: "Airbnb",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:lead-row"],
+  );
+});
+
+test("the company's newest demo wins whichever source registered it", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "html:run",
+        company_name: "wanderu (wanderu.com)",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "lead-row",
+        lead_id: "l9",
+        company_name: "Wanderu",
+        created_at: "2026-08-01T09:00:00Z",
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:html:run"],
+  );
+});
+
+test("a bare name reads as the company only when one domain claims it", () => {
+  /* Two Ollies on two sites are two companies, so the bare row joins
+     neither: merging namesakes would hide one of them. */
+  const rows = [
+    libraryRow({ demo_id: "us", company_name: "Ollie (ollie.ai)" }),
+    libraryRow({ demo_id: "uk", company_name: "Ollie (ollie.co.uk)" }),
+    libraryRow({ demo_id: "bare", company_name: "Ollie" }),
+  ];
+  assert.deepEqual(companyKeys(rows), [
+    "domain:ollie.ai",
+    "domain:ollie.co.uk",
+    "name:ollie",
+  ]);
+  assert.equal(latestPerCompany(rows).length, 3);
+});
+
+test("a trailing note that is not a domain stays part of the company name", () => {
+  assert.deepEqual(companyIdentity("Meta (WhatsApp)"), {
+    key: "meta (whatsapp)",
+    domain: null,
+  });
+  assert.deepEqual(companyIdentity("  Booking.com   (https://www.Booking.com/)  "), {
+    key: "booking.com",
+    domain: "booking.com",
+  });
+  assert.deepEqual(companyIdentity("Trip.com"), {
+    key: "trip.com",
+    domain: "trip.com",
+  });
+});
+
+test("a demo made for a named person keeps its own card", () => {
+  /* The endpoint keeps one demo per named lead on purpose. Two people at one
+     company are two demos, and collapsing them would hide one. */
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({ demo_id: "d-alex", lead_id: "l1", lead_name: "Alex", company_name: "Acme (acme.com)" }),
+      libraryRow({ demo_id: "d-sam", lead_id: "l2", lead_name: "Sam", company_name: "Acme" }),
+      libraryRow({ demo_id: "d-company", company_name: "Acme (acme.com)" }),
+    ],
+    [],
+  );
+  assert.deepEqual(demos.map((demo) => demo.key).sort(), [
+    "library:d-alex",
+    "library:d-company",
+    "library:d-sam",
+  ]);
+});
+
+test("a company whose newest demo is already queued still shows the one that is not", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "queued",
+        lead_id: "l1",
+        company_name: "Airbnb",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "staged",
+        company_name: "airbnb (airbnb.com)",
+        created_at: "2026-09-10T09:00:00Z",
+      }),
+    ],
+    [send({ lead: lead("l1", "Dana Whitfield", "Airbnb") })],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:staged"],
   );
 });
