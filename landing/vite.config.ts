@@ -14,6 +14,11 @@ export default defineConfig({
     },
   },
   server: {
+    /* Bind IPv4 loopback by name, not by the `localhost` default. On macOS
+       `localhost` can resolve to ::1 first, and the dev server then listens on
+       IPv6 only. Every QA script in scripts/ dials http://127.0.0.1, so that
+       restart hands them ECONNREFUSED. */
+    host: '127.0.0.1',
     proxy: {
       '/d/': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/auth': { target: 'http://127.0.0.1:8000', changeOrigin: true },
