@@ -2,7 +2,7 @@
    pending and nothing scheduled opened /dashboard/demos on three empty
    segments and read it as lost work.
 
-   Run the dev server on 5191 first: npm run dev -- --port 5191
+   Run the dev server on 5191 first: npm run dev:qa
    Another port: DEMO_QA_BASE_URL=http://127.0.0.1:5193 node scripts/demos-library-qa.mjs */
 import { chromium, webkit, devices } from 'playwright';
 import assert from 'node:assert/strict';
