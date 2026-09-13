@@ -41,6 +41,14 @@
       "destination": "https://driftwood-backend-767736087356.us-central1.run.app/api/:path*"
     },
     {
+      "source": "/mcp/",
+      "destination": "https://driftwood-backend-767736087356.us-central1.run.app/mcp/"
+    },
+    {
+      "source": "/mcp/:ppath(.*)",
+      "destination": "https://driftwood-backend-767736087356.us-central1.run.app/mcp/:ppath"
+    },
+    {
       "source": "/ingest/static/:ppath(.*)",
       "destination": "https://us-assets.i.posthog.com/static/:ppath"
     },
@@ -84,7 +92,7 @@
       ]
     },
     {
-      "source": "/((?!d/|api/|auth/|health|linkedin/|email/|twitter/|mailboxes/|triage|triage/|_vercel/).*)",
+      "source": "/((?!d/|api/|auth/|health|linkedin/|email/|twitter/|mailboxes/|mcp/|triage|triage/|_vercel/).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
