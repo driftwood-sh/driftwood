@@ -2611,6 +2611,10 @@ if (mockMode) {
     { demo_id: "demo-northstar", lead_id: "Priya Patel", lead_name: "Priya Patel", company_name: "Northstar", description: "The plan choice the pricing page drops.", artifact_id: "demo-artifact-northstar", name: "northstar-pricing", content_type: "video/mp4", content_url: "/compare.mp4", created_at: hoursAgo(30), updated_at: hoursAgo(29) },
     { demo_id: "demo-lead-1", lead_id: "demo-lead-1", lead_name: "Example lead", company_name: "Sample company", description: "A sample of the personalized walkthrough your leads will receive.", artifact_id: "demo-artifact-1", name: "sample-walkthrough", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(24), updated_at: hoursAgo(2) },
     { demo_id: "demo-lead-2", lead_id: "demo-lead-2", lead_name: "Another example lead", company_name: "Sample account", description: "A still from the demo, ready for your review.", artifact_id: "demo-artifact-2", name: "sample-demo-preview", content_type: "image/webp", content_url: "/demo-still.webp", created_at: hoursAgo(48), updated_at: hoursAgo(24) },
+    /* A phone recording, 540x960. Every other fixture is landscape, which is
+       why a portrait clip reached a customer painted as a strip between two
+       black bars. This row is the one the frame has to reshape. */
+    { demo_id: "demo-phone", lead_id: null, lead_name: null, company_name: "Kitebar", description: "Filmed on a phone: the upload that reports done at 90%.", artifact_id: "demo-artifact-phone", name: "kitebar-upload-phone", content_type: "video/mp4", content_url: "/demo-portrait.mp4", created_at: hoursAgo(36), updated_at: hoursAgo(35) },
   ];
   /* ?mock=library-only — the workspace this page was broken for: demos made,
      nothing pending, nothing scheduled. Three empty segments is what sent a
@@ -2638,7 +2642,10 @@ if (mockMode) {
       artifact_id: `photon-artifact-${slug}`,
       name: `photon-demo-${slug}`,
       content_type: "video/mp4",
-      content_url: index % 3 === 0 ? "/case-autosana.mp4" : index % 3 === 1 ? "/compare.mp4" : "/case-oruk.mp4",
+      /* One in four is a phone recording, because a real library of these is
+         mostly phone recordings and every one of them used to paint as a
+         strip inside a 16:9 frame. */
+      content_url: ["/case-autosana.mp4", "/compare.mp4", "/case-oruk.mp4", "/demo-portrait.mp4"][index % 4],
       created_at: hoursAgo(6 + index * 5),
       updated_at: hoursAgo(2 + index * 5),
     };

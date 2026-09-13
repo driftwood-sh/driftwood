@@ -5,6 +5,7 @@ import { analyticsWindow } from "../analytics/model";
 import { withMockMode } from "../mock-mode";
 import { announceDemosCountChanged } from "./nav-count";
 import { sendFeedback } from "./api";
+import { clipFrame, RESERVED_CLIP_FRAME, type ClipFrame } from "./clip-frame";
 import {
   LIBRARY_CHUNK,
   PAGE_GUARD,
@@ -1564,7 +1565,12 @@ function BugLine({
 /* The clip: a real thumbnail with its length in the corner, which is the
    first frame the file itself reports. A clip that genuinely will not render
    keeps the same frame, a play mark and a way out to a tab, rather than
-   turning the card's biggest element into an error message. */
+   turning the card's biggest element into an error message.
+
+   The frame takes the shape of the file. loadedmetadata is the one moment the
+   element knows both its length and its pixel size, so the badge and the
+   ratio are set together, in one render: the space was already reserved at
+   16:9, and it is replaced in a single step rather than in stages. */
 function DemoVideo({
   ref,
   href,
@@ -1582,8 +1588,14 @@ function DemoVideo({
 }) {
   const [duration, setDuration] = useState<string | null>(null);
   const [failed, setFailed] = useState(!playable);
+  const [frame, setFrame] = useState<ClipFrame>(RESERVED_CLIP_FRAME);
   return (
-    <div className="dp-video-shell">
+    /* The shell is the frame, so the duration badge sits in the corner of the
+       clip rather than the corner of the rail around it. */
+    <div
+      className={`dp-video-shell${frame.portrait ? " is-portrait" : ""}`}
+      style={{ aspectRatio: frame.aspectRatio, width: frame.width }}
+    >
       {failed ? (
         <a
           className="dp-video dp-video-dead"
@@ -1609,9 +1621,12 @@ function DemoVideo({
             onFailed();
           }}
           onLoadedMetadata={() => {
-            const seconds = ref.current?.duration;
+            const video = ref.current;
+            if (!video) return;
+            const seconds = video.duration;
             if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0)
               setDuration(timestampLabel(seconds));
+            setFrame(clipFrame(video.videoWidth, video.videoHeight));
           }}
         />
       )}
