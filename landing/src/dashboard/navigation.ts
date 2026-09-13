@@ -61,7 +61,7 @@ const ADMIN_INTERNAL: NavItem[] = [
   { id: "review", label: "Review queue", href: "/dashboard/review", icon: "review" },
   { id: "admin-fleet", label: "Fleet", href: "/dashboard/admin/fleet", icon: "fleet" },
   { id: "admin-agents", label: "Agents", href: "/dashboard/admin/agents", icon: "agents" },
-  { id: "admin-drift", label: "Drift runs", href: "/dashboard/admin/drift", icon: "drift" },
+  { id: "admin-drift", label: "Demo workflows", href: "/dashboard/admin/drift", icon: "drift" },
   // Dropped 2026-08-23 (Aayush/Dheer call), re-added 2026-08-31 on Aayush's ask.
   { id: "admin-search", label: "Search visibility", href: "/dashboard/admin/search-visibility", icon: "search" },
 ];
