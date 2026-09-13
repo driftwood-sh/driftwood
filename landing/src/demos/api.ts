@@ -1,3 +1,7 @@
+import type { DemoApproval } from "./staging-model";
+
+export type { DemoApproval };
+
 export type Demo = {
   demo_id: string;
   lead_id: string | null;
@@ -11,6 +15,10 @@ export type Demo = {
   preview_url?: string | null;
   created_at: string;
   updated_at: string;
+  /* What the customer decided about this demo. Optional: the field is being
+     added to the list response, so a client that ships first reads nothing
+     and every card offers Approve. */
+  approval?: DemoApproval | null;
 };
 
 export type DemosPage = { demos: Demo[]; total: number; limit: number; offset: number };
