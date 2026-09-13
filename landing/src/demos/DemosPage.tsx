@@ -12,6 +12,8 @@ import {
   REVIEW_CHUNK,
   SEND_CHUNK,
   approvalPolicy,
+  approveDemo,
+  approveDemos,
   decide,
   fetchLibraryPage,
   fetchQueuePage,
@@ -33,11 +35,18 @@ import {
   EMPTY_SENDERS,
 } from "./staging-api";
 import {
+  ADD_A_NAME,
+  ADD_A_NAME_LABEL,
+  APPROVED_GROUP,
   EMPTY_QUEUE,
   EMPTY_SENT,
   EMPTY_STAGING,
   NOT_AVAILABLE,
   NO_LIMITS,
+  approvableDemos,
+  approveKeyOf,
+  approvedLabel,
+  approvedNotScheduled,
   dayChannelTitle,
   emailCollapsed,
   daySentence,
@@ -45,8 +54,10 @@ import {
   groupQueueByDay,
   groupSentByDay,
   groupStagedDemos,
+  isApprovable,
   laterSummary,
   plannedClock,
+  readApprovalStatus,
   queueHeadline,
   readyForYou,
   queueRows,
@@ -56,7 +67,9 @@ import {
   threadHref,
   timestampLabel,
   videoSeconds,
+  type ApprovedRow,
   type DailyLimits,
+  type DemoApproval,
   type QueueDay,
   type QueueRow,
   type LibraryDemo,
@@ -86,9 +99,15 @@ import "./demos-page.css";
    so listing them would mean walking every campaign. It lands when the
    backend serves one list for the workspace.
 
+   Approve runs before anyone has been found to send a demo to: it says "this
+   demo is good, send it to the right people at this company". So an approved
+   demo has no day yet, and it would sit in neither segment. It leaves Staging
+   and lands in one group at the top of Queue until its sends exist.
+
    Four writes wait on the backend too: the per-row queue controls and the
    staging pin. Each answers 404 until then, which the page reports beside the
-   control that was pressed rather than as a failure. */
+   control that was pressed rather than as a failure. The two approve
+   endpoints report the same way. */
 
 const SEGMENTS = [
   ["staging", "Staging"],
@@ -273,6 +292,10 @@ export default function DemosPage() {
      the box: a mis-press must not throw away what the customer typed. */
   const [changeOpen, setChangeOpen] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  /* The open name field on an approved demo nobody was found for, and what is
+     typed in it. Same rule as the change box: a mis-press keeps the text. */
+  const [hintOpen, setHintOpen] = useState<string | null>(null);
+  const [hints, setHints] = useState<Record<string, string>>({});
   const [armed, setArmed] = useState<{ at: number; what: Armed } | null>(null);
   const [pinnable, setPinnable] = useState(true);
   const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
@@ -442,8 +465,14 @@ export default function DemosPage() {
       );
       const queued = queueRows(queuePage?.sends ?? [], new Set(), EMPTY_SENDERS);
       const sentRows = groupSentByDay(sentPage?.sends ?? []);
+      /* A workspace whose every demo is approved and waiting has nothing in
+         Staging and no days in Queue, and the group at the top of Queue is
+         the only place its work is. So the group counts here too. */
+      const waiting = approvedNotScheduled(libraryPage?.demos ?? []);
       setSegment(
-        (picked) => picked ?? firstWithRows(staged.length, queued.length, sentRows.length),
+        (picked) =>
+          picked ??
+          firstWithRows(staged.length, queued.length + waiting.length, sentRows.length),
       );
     })();
   }, [loadStaging, loadLibrary, loadQueue, loadSent]);
@@ -552,9 +581,21 @@ export default function DemosPage() {
     library.status === "ready" ? library.data.rows : [],
     queue.status === "ready" ? queue.data.sends : [],
   );
-  /* The cards a decision can act on. A demo with no email yet has no review
-     item behind it, so Approve all leaves it where it is. */
+  /* The cards a decision can act on: the ones with an email, whose review
+     item the decide endpoint names. */
   const decidable = stagedDemos.filter((demo) => demo.canDecide);
+  /* The cards an approve can act on: the ones with no email of their own that
+     nobody has approved yet. The two lists never overlap, and Approve all
+     covers both. */
+  const approvable = approvableDemos(stagedDemos);
+  /* Approved, and nobody to send it to yet: the group above the queue's days.
+     It reads the library, because that is the only source that carries the
+     approval of a demo with no sends behind it. */
+  const approvedRows = approvedNotScheduled(
+    library.status === "ready" ? library.data.rows : [],
+  );
+  /* What one press of Approve all covers, and the number it confirms with. */
+  const approveAllCount = decidable.length + approvable.length;
 
   const rows =
     /* The account pools are no longer read here: the From cell comes from the
@@ -671,36 +712,142 @@ export default function DemosPage() {
     }
   }
 
+  /* An approval the customer just made, written onto the rows the page is
+     already holding. Without it an approved demo would sit in Staging until
+     the next read of the library. */
+  function patchApprovals(demoKeys: readonly string[], approval: DemoApproval) {
+    const keys = new Set(demoKeys);
+    setLibrary((prev) =>
+      prev.status === "ready"
+        ? {
+            status: "ready",
+            data: {
+              ...prev.data,
+              rows: prev.data.rows.map((row) =>
+                keys.has(row.demo_id) ? { ...row, approval } : row,
+              ),
+            },
+          }
+        : prev,
+    );
+  }
+
+  /* One approve press: a demo, and the name the customer typed when they
+     typed one. Answers whether it went through, so the caller says the right
+     thing, and reports a 404 as "not available yet" through its own `fail`,
+     because the two callers put that line in different places. */
+  async function runApprove(
+    demoKey: string,
+    busyKey: string,
+    hint: string | undefined,
+    fail: (message: string) => void,
+  ): Promise<boolean> {
+    markBusy(busyKey, true);
+    const result = await approveDemo(demoKey, hint);
+    markBusy(busyKey, false);
+    if (!result.ok) {
+      fail(result.missing ? NOT_AVAILABLE : result.message);
+      return false;
+    }
+    patchApprovals([demoKey], {
+      status: readApprovalStatus(result.result?.status),
+      approved_at: result.result?.approved_at ?? new Date().toISOString(),
+      note: null,
+    });
+    announceDemosCountChanged();
+    return true;
+  }
+
+  /* Approve, on a demo with no email of its own. */
+  async function approveCard(demo: StagedDemo) {
+    const demoKey = approveKeyOf(demo);
+    if (!demoKey) return;
+    setCardError(null);
+    const ok = await runApprove(demoKey, demo.key, undefined, (message) =>
+      setCardError({ key: demo.key, message }),
+    );
+    if (ok) toast("Approved.", "success");
+  }
+
+  /* The name the customer added to a demo nobody was found for. It rides the
+     same endpoint, so the row answers with the state it moves to. */
+  async function addName(row: ApprovedRow) {
+    const name = (hints[row.demoKey] ?? "").trim();
+    if (!name) return;
+    setRowError(null);
+    const ok = await runApprove(row.demoKey, row.demoKey, name, (message) =>
+      setRowError({ id: row.demoKey, message }),
+    );
+    if (!ok) return;
+    setHintOpen((prev) => (prev === row.demoKey ? null : prev));
+    setHints((prev) => {
+      if (!(row.demoKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[row.demoKey];
+      return next;
+    });
+    toast(`${name} added.`, "success");
+  }
+
+  /* One press over the whole segment. The demos with no email of their own go
+     out as one bulk approve, with no cap on how many; the demos that already
+     have an email go as one decide, the way they always did. Either half can
+     be empty, and the toast counts both. */
   async function runApproveAll() {
-    if (decidable.length === 0) return;
+    const keys = approvable
+      .map(approveKeyOf)
+      .filter((key): key is string => key !== null);
+    if (keys.length === 0 && decidable.length === 0) return;
     markBusy("all", true);
     setCardError(null);
-    try {
-      const decisions = decidable.flatMap((demo) => decisionsFor(demo, "approve"));
-      await decide(decisions, decidable[0].policyVersion);
-      const ids = new Set(decidable.flatMap((demo) => demo.itemIds));
-      setStaging((prev) =>
-        prev.status === "ready"
-          ? {
-              status: "ready",
-              data: { ...prev.data, items: prev.data.items.filter((item) => !ids.has(item.id)) },
-            }
-          : prev,
-      );
+    let approved = 0;
+    let failure: string | null = null;
+    if (keys.length > 0) {
+      const result = await approveDemos(keys);
+      if (result.ok) {
+        const accepted = result.result?.accepted_keys ?? keys;
+        patchApprovals(accepted, {
+          status: "queued",
+          approved_at: new Date().toISOString(),
+          note: null,
+        });
+        approved += result.result?.accepted ?? accepted.length;
+        /* Some went through and some did not: say why the rest did not,
+           rather than reporting a number that hides them. */
+        const rejected = result.result?.rejected ?? [];
+        if (rejected.length > 0) failure = rejected[0].reason;
+      } else {
+        failure = result.missing ? NOT_AVAILABLE : result.message;
+      }
+    }
+    if (!failure && decidable.length > 0) {
+      try {
+        const decisions = decidable.flatMap((demo) => decisionsFor(demo, "approve"));
+        await decide(decisions, decidable[0].policyVersion);
+        const ids = new Set(decidable.flatMap((demo) => demo.itemIds));
+        setStaging((prev) =>
+          prev.status === "ready"
+            ? {
+                status: "ready",
+                data: { ...prev.data, items: prev.data.items.filter((item) => !ids.has(item.id)) },
+              }
+            : prev,
+        );
+        approved += decidable.length;
+        void loadQueue(true);
+      } catch (error) {
+        failure = error instanceof Error ? error.message : LOAD_FAILED;
+      }
+    }
+    markBusy("all", false);
+    if (approved > 0) {
       toast(
-        `${decidable.length} ${decidable.length === 1 ? "demo" : "demos"} approved.`,
+        `${approved.toLocaleString()} ${approved === 1 ? "demo" : "demos"} approved.`,
         "success",
       );
       announceDemosCountChanged();
-      void loadQueue(true);
-    } catch (error) {
-      setCardError({
-        key: "all",
-        message: error instanceof Error ? error.message : LOAD_FAILED,
-      });
-    } finally {
-      markBusy("all", false);
     }
+    if (failure) setCardError({ key: "all", message: failure });
   }
 
   /* Pin and its inverse. Pinning keeps a demo past the 3-day expiry, and
@@ -902,7 +1049,16 @@ export default function DemosPage() {
     void loadStaging(true);
     void loadLibrary(true);
   };
-  const queueCount = queue.status === "ready" && queue.data.complete ? rows.length : null;
+  /* Queue holds the approved group as well as the days, so its number counts
+     both, and it waits for the library the same way Staging does: half a list
+     is a wrong number. A library that failed outright contributes no rows, so
+     the number is the days alone rather than nothing at all. */
+  const libraryWhole =
+    library.status === "error" || (library.status === "ready" && library.data.complete);
+  const queueCount =
+    queue.status === "ready" && queue.data.complete && libraryWhole
+      ? rows.length + approvedRows.length
+      : null;
   /* The count is what the segment lists, not what the ledger holds: the
      ledger also carries connection requests, which are not demos and are not
      on this page, so `total` would name rows the reader cannot find. */
@@ -960,7 +1116,7 @@ export default function DemosPage() {
                 )
               )}
             </div>
-            {decidable.length > 1 && (
+            {approveAllCount > 1 && (
               <div className="dp-bar-actions">
                 <button
                   type="button"
@@ -978,7 +1134,7 @@ export default function DemosPage() {
                   {busy.has("all")
                     ? "Approving"
                     : isArmed({ kind: "approve-all" })
-                      ? `Approve all ${decidable.length.toLocaleString()}? Confirm`
+                      ? `Approve all ${approveAllCount.toLocaleString()}? Confirm`
                       : "Approve all"}
                 </button>
               </div>
@@ -1015,7 +1171,12 @@ export default function DemosPage() {
                   armedSkip={isArmed({ kind: "skip", key: demo.key })}
                   change={changeOpen === demo.key ? (drafts[demo.key] ?? "") : null}
                   error={cardError?.key === demo.key ? cardError.message : null}
-                  onApprove={() => void submitDecision(demo, "approve", undefined, "Approved.")}
+                  approvable={isApprovable(demo)}
+                  onApprove={() =>
+                    demo.library
+                      ? void approveCard(demo)
+                      : void submitDecision(demo, "approve", undefined, "Approved.")
+                  }
                   onSkip={() =>
                     armOrRun({ kind: "skip", key: demo.key }, () =>
                       void submitDecision(demo, "deny", "Skipped in Staging", "Skipped."),
@@ -1134,6 +1295,21 @@ export default function DemosPage() {
               )}
             </div>
           )}
+          {/* Approved, and nobody to send it to yet. It sits above the days
+              because it has no day of its own, and it leaves for one as soon
+              as its sends exist. */}
+          {approvedRows.length > 0 && (
+            <ApprovedGroup
+              rows={approvedRows}
+              busy={busy}
+              rowError={rowError}
+              openName={hintOpen}
+              names={hints}
+              onOpenName={(key) => setHintOpen((prev) => (prev === key ? null : key))}
+              onNameText={(key, text) => setHints((prev) => ({ ...prev, [key]: text }))}
+              onAddName={(row) => void addName(row)}
+            />
+          )}
           {queue.status === "loading" ? (
             <RowSkeletons />
           ) : queue.status === "error" ? (
@@ -1145,12 +1321,14 @@ export default function DemosPage() {
               }}
             />
           ) : rows.length === 0 ? (
-            <div className="dp-empty">
-              <p>{EMPTY_QUEUE}</p>
-              <button type="button" className="dp-btn" onClick={() => switchSegment("staging")}>
-                See Staging
-              </button>
-            </div>
+            approvedRows.length === 0 && (
+              <div className="dp-empty">
+                <p>{EMPTY_QUEUE}</p>
+                <button type="button" className="dp-btn" onClick={() => switchSegment("staging")}>
+                  See Staging
+                </button>
+              </div>
+            )
           ) : (
             <>
               {openDays.map((day) => (
@@ -1290,6 +1468,7 @@ function DemoCard({
   armedSkip,
   change,
   error,
+  approvable,
   onApprove,
   onSkip,
   onOpenChange,
@@ -1304,6 +1483,9 @@ function DemoCard({
   armedSkip: boolean;
   change: string | null;
   error: string | null;
+  /* True on a demo with no email of its own that nobody has approved yet:
+     Approve names the demo, not a review item. */
+  approvable: boolean;
   onApprove: () => void;
   onSkip: () => void;
   onOpenChange: () => void;
@@ -1400,10 +1582,11 @@ function DemoCard({
       {(demo.canDecide || demo.library !== null) && (
         <>
           <div className="dp-actions">
-            {/* Approve, Skip and Pin each name a review item, and a demo with
-                no email yet has none: the one thing the customer can do with
-                it is say what should change. */}
-            {demo.canDecide && (
+            {/* Approve says "this one is good, send it to the right people at
+                this company", whether or not an email is written for it yet.
+                Skip and Pin each name a review item, so a demo with no email
+                does not carry them. */}
+            {(demo.canDecide || approvable) && (
               <button
                 type="button"
                 className="dp-btn is-primary"
@@ -1632,6 +1815,132 @@ function DemoVideo({
       )}
       {duration && <span className="dp-duration">{duration}</span>}
     </div>
+  );
+}
+
+/* ---------- approved, and nobody to send it to yet ---------- */
+
+/* The group above the queue's days. Every row is a demo the customer
+   approved, with the company it was made for and the day they approved it.
+   A row nobody was found for carries one line and one thing to do about it:
+   a name, which goes back through the same approve call. */
+function ApprovedGroup({
+  rows,
+  busy,
+  rowError,
+  openName,
+  names,
+  onOpenName,
+  onNameText,
+  onAddName,
+}: {
+  rows: ApprovedRow[];
+  busy: ReadonlySet<string>;
+  rowError: { id: string; message: string } | null;
+  openName: string | null;
+  names: Record<string, string>;
+  onOpenName: (demoKey: string) => void;
+  onNameText: (demoKey: string, text: string) => void;
+  onAddName: (row: ApprovedRow) => void;
+}) {
+  return (
+    <section className="dp-day dp-approved" aria-label={APPROVED_GROUP}>
+      <div className="dp-day-head">
+        <h2 className="dp-day-name">{APPROVED_GROUP}</h2>
+        <span className="dp-day-load">{rows.length.toLocaleString()}</span>
+      </div>
+      <div className="dp-tablewrap">
+        <table className="dp-table">
+          <colgroup>
+            <col />
+            <col className="dp-w-planned" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Company</th>
+              <th scope="col">Approved</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const working = busy.has(row.demoKey);
+              const open = openName === row.demoKey;
+              const typed = names[row.demoKey] ?? "";
+              return (
+                <tr key={row.demoKey}>
+                  <td>
+                    {row.nobodyLine ? (
+                      <>
+                        <span className="dp-nobody">{row.nobodyLine}</span>{" "}
+                        <button
+                          type="button"
+                          className="dp-seek"
+                          aria-expanded={open}
+                          disabled={working}
+                          title={working ? "Working on this demo now" : undefined}
+                          onClick={() => onOpenName(row.demoKey)}
+                        >
+                          {ADD_A_NAME}
+                        </button>
+                      </>
+                    ) : (
+                      row.company
+                    )}
+                    {open && (
+                      <div className="dp-name">
+                        <label className="dp-label" htmlFor={`name-${row.demoKey}`}>
+                          {ADD_A_NAME_LABEL}
+                        </label>
+                        <input
+                          id={`name-${row.demoKey}`}
+                          type="text"
+                          value={typed}
+                          onChange={(event) => onNameText(row.demoKey, event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && typed.trim()) onAddName(row);
+                          }}
+                        />
+                        <div className="dp-name-row">
+                          <button
+                            type="button"
+                            className="dp-btn is-small is-primary"
+                            disabled={working || typed.trim().length === 0}
+                            title={
+                              working
+                                ? "Working on this demo now"
+                                : typed.trim().length === 0
+                                  ? "Type a name first"
+                                  : undefined
+                            }
+                            onClick={() => onAddName(row)}
+                          >
+                            {working ? "Working" : "Add"}
+                          </button>
+                          <button
+                            type="button"
+                            className="dp-btn is-small"
+                            disabled={working}
+                            onClick={() => onOpenName(row.demoKey)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {rowError?.id === row.demoKey && (
+                      <p className="dp-rowerr" role="alert">
+                        {rowError.message}
+                      </p>
+                    )}
+                  </td>
+                  <td className="dp-num dp-muted">{approvedLabel(row.approvedAt)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

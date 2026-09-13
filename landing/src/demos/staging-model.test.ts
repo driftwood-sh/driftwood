@@ -2,9 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ACCOUNT_UNKNOWN,
+  approvableDemos,
+  approvalState,
+  approveKeyOf,
+  approvedLabel,
+  approvedNotScheduled,
+  awaitsPeople,
   channelLabel,
   decisionsFor,
   demoHeading,
+  isApprovable,
+  nobodyFoundLine,
+  readApprovalStatus,
   groupSentByDay,
   groupStagedDemos,
   isHeld,
@@ -28,6 +37,7 @@ import {
   videoSeconds,
   sendingAccount,
   threadHref,
+  type ApprovalStatus,
   type LeadContext,
   type LibraryDemo,
   type ReviewItem,
@@ -514,4 +524,176 @@ test("both sources run newest first, because today's work is what a customer ope
     demos.map((demo) => demo.key),
     ["library:newest", "library:middle", "lead:l1"],
   );
+});
+
+/* ---------- approve, before anyone has been found ---------- */
+
+test("a demo with no approval field at all still offers Approve", () => {
+  /* The field is being added to the list response, so a client that ships
+     first reads nothing. Nothing must never read as "already approved". */
+  const row = libraryRow({});
+  assert.equal("approval" in row, false);
+  assert.equal(approvalState(row), "none");
+  assert.equal(awaitsPeople(row), false);
+  const demos = stagedWithLibrary([], [row], []);
+  assert.equal(demos.length, 1);
+  assert.equal(isApprovable(demos[0]), true);
+});
+
+test("an explicit null approval reads the same as an absent one", () => {
+  assert.equal(approvalState(libraryRow({ approval: null })), "none");
+  assert.equal(approvalState(null), "none");
+});
+
+test("the five statuses read as four states, because two pairs are one state", () => {
+  const state = (status: ApprovalStatus) =>
+    approvalState(libraryRow({ approval: { status, approved_at: "2026-09-12T09:00:00Z", note: null } }));
+  assert.equal(state("queued"), "waiting");
+  assert.equal(state("handed_to_agent"), "waiting");
+  assert.equal(state("no_contacts_found"), "nobody");
+  assert.equal(state("blocked"), "nobody");
+  assert.equal(state("contacts_found"), "filed");
+});
+
+test("a status this build has never heard of still means approved", () => {
+  assert.equal(readApprovalStatus("something_new"), "queued");
+  assert.equal(readApprovalStatus(undefined), "queued");
+  assert.equal(readApprovalStatus("handed_to_agent"), "handed_to_agent");
+});
+
+test("an approved demo leaves Staging, and one whose sends are filed does not", () => {
+  const approved = (status: ApprovalStatus, id: string) =>
+    libraryRow({
+      demo_id: id,
+      name: `photon-demo-${id}`,
+      approval: { status, approved_at: "2026-09-12T09:00:00Z", note: null },
+    });
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({ demo_id: "fresh", name: "photon-demo-fresh" }),
+      approved("queued", "waiting"),
+      approved("handed_to_agent", "handed"),
+      approved("no_contacts_found", "nobody"),
+      approved("blocked", "blocked"),
+      approved("contacts_found", "filed"),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key).sort(),
+    ["library:filed", "library:fresh"],
+  );
+});
+
+test("Approve all covers the demos with no email, and never one already approved", () => {
+  const demos = stagedWithLibrary(
+    groupStagedDemos([item({ id: "email-1" })]),
+    [
+      libraryRow({ demo_id: "a", name: "photon-demo-a" }),
+      libraryRow({ demo_id: "b", name: "photon-demo-b" }),
+      libraryRow({
+        demo_id: "done",
+        name: "photon-demo-done",
+        approval: { status: "contacts_found", approved_at: "2026-09-12T09:00:00Z", note: null },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    approvableDemos(demos).map((demo) => approveKeyOf(demo)),
+    ["a", "b"],
+  );
+  /* The card with an email is a decision, not an approve: the two lists never
+     overlap, so a press over the whole segment counts each demo once. */
+  assert.equal(
+    demos.filter((demo) => demo.canDecide).every((demo) => !isApprovable(demo)),
+    true,
+  );
+  assert.equal(approveKeyOf(demos.find((demo) => demo.canDecide)!), null);
+});
+
+test("the demo key an approve names survives a colon in the id", () => {
+  const demos = stagedWithLibrary([], [libraryRow({ demo_id: "html:a1b2c3" })], []);
+  assert.equal(approveKeyOf(demos[0]), "html:a1b2c3");
+  assert.equal(encodeURIComponent(approveKeyOf(demos[0])!), "html%3Aa1b2c3");
+});
+
+/* ---------- approved, and nobody to send it to yet ---------- */
+
+test("the group holds the approved demos with no people, newest approval first", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({ demo_id: "fresh", name: "photon-demo-fresh" }),
+    libraryRow({
+      demo_id: "older",
+      company_name: "Ledgerline",
+      approval: { status: "handed_to_agent", approved_at: "2026-09-10T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "newer",
+      company_name: "Meridian",
+      approval: { status: "queued", approved_at: "2026-09-12T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "filed",
+      company_name: "Northstar",
+      approval: { status: "contacts_found", approved_at: "2026-09-13T09:00:00Z", note: null },
+    }),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => [row.demoKey, row.company, row.approvedAt]),
+    [
+      ["newer", "Meridian", "2026-09-12T09:00:00Z"],
+      ["older", "Ledgerline", "2026-09-10T09:00:00Z"],
+    ],
+  );
+  /* Still people to come, so no row carries the line. */
+  assert.deepEqual(rows.map((row) => row.nobodyLine), [null, null]);
+});
+
+test("a demo nobody was found for carries one line, and the note writes it", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({
+      demo_id: "bloom",
+      company_name: "Bloom",
+      approval: { status: "no_contacts_found", approved_at: "2026-09-12T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "kestrel",
+      company_name: "Kestrel",
+      approval: { status: "blocked", approved_at: "2026-09-11T09:00:00Z", note: "Kestrel is on your blocklist." },
+    }),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => row.nobodyLine),
+    ["No one found at Bloom.", "Kestrel is on your blocklist."],
+  );
+});
+
+test("a note of blank space is not a line, so the company one stands", () => {
+  assert.equal(
+    nobodyFoundLine(
+      libraryRow({
+        company_name: "Bloom",
+        approval: { status: "no_contacts_found", approved_at: "2026-09-12T09:00:00Z", note: "   " },
+      }),
+    ),
+    "No one found at Bloom.",
+  );
+});
+
+test("a row with no approved_at falls back to the day the demo was made", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({ created_at: "2026-09-01T09:00:00Z", approval: { status: "queued", approved_at: "", note: null } }),
+  ]);
+  assert.equal(rows[0].approvedAt, "2026-09-01T09:00:00Z");
+});
+
+test("when they approved it: today, yesterday, then the date", () => {
+  const today = new Date(2026, 8, 13, 14, 0, 0);
+  const at = (y: number, m: number, d: number) => new Date(y, m, d, 9, 0, 0).toISOString();
+  assert.equal(approvedLabel(at(2026, 8, 13), today), "Today");
+  assert.equal(approvedLabel(at(2026, 8, 12), today), "Yesterday");
+  assert.equal(approvedLabel(at(2026, 8, 4), today), "Sep 4");
+  assert.equal(approvedLabel("not a date", today), "");
 });

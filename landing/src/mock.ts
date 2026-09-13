@@ -662,10 +662,18 @@ if (mockMode) {
     for (const row of rows) census[row.kind] = (census[row.kind] ?? 0) + 1;
     return census;
   };
+  /* The workspaces whose whole story is their demo library: nothing pending,
+     nothing queued and nothing sent. library-only is the one that opened on
+     three empty segments; the two approval modes are the same shape, so the
+     approved group at the top of Queue stands on its own there. */
+  const libraryWorkspace =
+    mockMode === "library-only" ||
+    mockMode === "demos-approval" ||
+    mockMode === "demos-approve-missing";
   const sendsApi = (_init?: RequestInit, url?: string) => {
     const params = new URL(url ?? "", location.origin).searchParams;
     /* Nothing queued and nothing sent, so Queue and Sent are both empty. */
-    if (mockMode === "library-only")
+    if (libraryWorkspace)
       return { sends: [], total: 0, limit: 100, offset: 0, counts: { pending: 0, pending_sends: 0, pending_system: 0, sent: 0 }, kind_counts: {} };
     if (params.get("view") !== "sent")
       return {
@@ -854,9 +862,9 @@ if (mockMode) {
   const pendingReviewsApi = (_init?:RequestInit,url?:string) => {
     const query = new URL(url ?? location.href,location.href).searchParams;
     const offset = Number(query.get("offset") ?? 0), limit = Number(query.get("limit") ?? 100);
-    /* The library-only workspace has nothing pending: that is the whole point
-       of the fixture. */
-    const pending = mockMode === "library-only" ? [] : reviews.pending.filter((row) => row.status === "pending");
+    /* A library workspace has nothing pending: that is the whole point of
+       those fixtures. */
+    const pending = libraryWorkspace ? [] : reviews.pending.filter((row) => row.status === "pending");
     return {...reviews,pending:pending.slice(offset,offset+limit).map((row) => ({...row,...reviewPermissions(row)})),total_pending:pending.length,offset,limit};
   };
   const decideReviews = (init?: RequestInit) => {
@@ -2607,14 +2615,38 @@ if (mockMode) {
      demo-northstar is the one both sources hold — a review pair for Priya
      Patel is pending above — and it proves Staging shows that demo once, with
      the email, rather than twice. */
-  const demoRows = [
-    { demo_id: "demo-northstar", lead_id: "Priya Patel", lead_name: "Priya Patel", company_name: "Northstar", description: "The plan choice the pricing page drops.", artifact_id: "demo-artifact-northstar", name: "northstar-pricing", content_type: "video/mp4", content_url: "/compare.mp4", created_at: hoursAgo(30), updated_at: hoursAgo(29) },
-    { demo_id: "demo-lead-1", lead_id: "demo-lead-1", lead_name: "Example lead", company_name: "Sample company", description: "A sample of the personalized walkthrough your leads will receive.", artifact_id: "demo-artifact-1", name: "sample-walkthrough", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(24), updated_at: hoursAgo(2) },
-    { demo_id: "demo-lead-2", lead_id: "demo-lead-2", lead_name: "Another example lead", company_name: "Sample account", description: "A still from the demo, ready for your review.", artifact_id: "demo-artifact-2", name: "sample-demo-preview", content_type: "image/webp", content_url: "/demo-still.webp", created_at: hoursAgo(48), updated_at: hoursAgo(24) },
+  /* One row of GET /dashboard/demos. `approval` is what the customer decided
+     about the demo: null until they approve it, and after that the state it
+     is in. The approve endpoints below write it, so the three states it can
+     paint are all reachable by pressing the real controls. */
+  type MockApproval = { status: string; approved_at: string; note: string | null };
+  type MockDemoRow = {
+    demo_id: string;
+    lead_id: string | null;
+    lead_name: string | null;
+    company_name: string;
+    description: string | null;
+    artifact_id: string;
+    name: string;
+    content_type: string;
+    content_url: string;
+    created_at: string;
+    updated_at: string;
+    approval: MockApproval | null;
+  };
+  const demoRows: MockDemoRow[] = [
+    { demo_id: "demo-northstar", lead_id: "Priya Patel", lead_name: "Priya Patel", company_name: "Northstar", description: "The plan choice the pricing page drops.", artifact_id: "demo-artifact-northstar", name: "northstar-pricing", content_type: "video/mp4", content_url: "/compare.mp4", created_at: hoursAgo(30), updated_at: hoursAgo(29), approval: null },
+    { demo_id: "demo-lead-1", lead_id: "demo-lead-1", lead_name: "Example lead", company_name: "Sample company", description: "A sample of the personalized walkthrough your leads will receive.", artifact_id: "demo-artifact-1", name: "sample-walkthrough", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(24), updated_at: hoursAgo(2), approval: null },
+    { demo_id: "demo-lead-2", lead_id: "demo-lead-2", lead_name: "Another example lead", company_name: "Sample account", description: "A still from the demo, ready for your review.", artifact_id: "demo-artifact-2", name: "sample-demo-preview", content_type: "image/webp", content_url: "/demo-still.webp", created_at: hoursAgo(48), updated_at: hoursAgo(24), approval: null },
     /* A phone recording, 540x960. Every other fixture is landscape, which is
        why a portrait clip reached a customer painted as a strip between two
        black bars. This row is the one the frame has to reshape. */
-    { demo_id: "demo-phone", lead_id: null, lead_name: null, company_name: "Kitebar", description: "Filmed on a phone: the upload that reports done at 90%.", artifact_id: "demo-artifact-phone", name: "kitebar-upload-phone", content_type: "video/mp4", content_url: "/demo-portrait.mp4", created_at: hoursAgo(36), updated_at: hoursAgo(35) },
+    { demo_id: "demo-phone", lead_id: null, lead_name: null, company_name: "Kitebar", description: "Filmed on a phone: the upload that reports done at 90%.", artifact_id: "demo-artifact-phone", name: "kitebar-upload-phone", content_type: "video/mp4", content_url: "/demo-portrait.mp4", created_at: hoursAgo(36), updated_at: hoursAgo(35), approval: null },
+    /* Two demos the customer already approved. Neither has anybody to send it
+       to yet, so both have left Staging for the group at the top of Queue,
+       and one of them is a demo nobody was found for. */
+    { demo_id: "demo-vantage", lead_id: null, lead_name: null, company_name: "Vantage", description: "The saved filter the report drops.", artifact_id: "demo-artifact-vantage", name: "vantage-report-filter", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(52), updated_at: hoursAgo(51), approval: { status: "queued", approved_at: hoursAgo(3), note: null } },
+    { demo_id: "demo-bloom", lead_id: null, lead_name: null, company_name: "Bloom", description: "The second address line checkout loses.", artifact_id: "demo-artifact-bloom", name: "bloom-checkout-address", content_type: "video/mp4", content_url: "/case-oruk.mp4", created_at: hoursAgo(60), updated_at: hoursAgo(59), approval: { status: "no_contacts_found", approved_at: hoursAgo(20), note: null } },
   ];
   /* ?mock=library-only — the workspace this page was broken for: demos made,
      nothing pending, nothing scheduled. Three empty segments is what sent a
@@ -2628,7 +2660,7 @@ if (mockMode) {
     "airbnb", "bookaway", "booking-com", "flixbus", "hostelworld", "omio",
     "getyourguide", "klook", "rome2rio", "trainline", "tripadvisor",
   ];
-  const libraryOnlyRows = Array.from({ length: 111 }, (_, index) => {
+  const libraryOnlyRows: MockDemoRow[] = Array.from({ length: 111 }, (_, index) => {
     const named = index < libraryNames.length;
     const slug = named ? libraryNames[index] : `run-${String(index - libraryNames.length + 1).padStart(3, "0")}`;
     return {
@@ -2648,20 +2680,132 @@ if (mockMode) {
       content_url: ["/case-autosana.mp4", "/compare.mp4", "/case-oruk.mp4", "/demo-portrait.mp4"][index % 4],
       created_at: hoursAgo(6 + index * 5),
       updated_at: hoursAgo(2 + index * 5),
+      approval: null,
     };
   });
+  /* ?mock=demos-approval — the workspace this flow was built for: sixty demos
+     made, no email on any of them, nothing pending and nothing scheduled.
+     Sixty is the real number, so Approve all confirms with the number a
+     customer would really press.
+
+     Four more rows sit behind those sixty, already approved: two waiting for
+     people, and two nobody was found for. One of the two carries the
+     backend's own note and one carries none, which is the difference between
+     the line the note writes and the fallback line.
+
+     ?mock=demos-approve-missing serves the same library and answers both
+     approve endpoints with 404, which is what the page meets in prod until
+     the backend ships. */
+  const approvalCompanies = [
+    "Airbnb", "Bookaway", "Booking.com", "Flixbus", "Hostelworld", "Omio",
+    "GetYourGuide", "Klook", "Rome2rio", "Trainline", "Tripadvisor", "Expedia",
+  ];
+  const approvalRows: MockDemoRow[] = [
+    ...Array.from({ length: 60 }, (_, index): MockDemoRow => ({
+      demo_id: `photon-approve-${String(index + 1).padStart(2, "0")}`,
+      lead_id: null,
+      lead_name: null,
+      company_name:
+        index < approvalCompanies.length
+          ? approvalCompanies[index]
+          : `Demo run ${index - approvalCompanies.length + 1}`,
+      description: index % 3 === 0 ? "The checkout step that drops a booking." : null,
+      artifact_id: `photon-approve-artifact-${index + 1}`,
+      name: `photon-approve-${index + 1}`,
+      content_type: "video/mp4",
+      content_url: ["/case-autosana.mp4", "/compare.mp4", "/case-oruk.mp4"][index % 3],
+      created_at: hoursAgo(6 + index * 4),
+      updated_at: hoursAgo(2 + index * 4),
+      approval: null,
+    })),
+    { demo_id: "photon-approved-meridian", lead_id: null, lead_name: null, company_name: "Meridian", description: "The same-day booking the calendar drops.", artifact_id: "photon-approved-artifact-1", name: "photon-approved-meridian", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(300), updated_at: hoursAgo(299), approval: { status: "queued", approved_at: hoursAgo(2), note: null } },
+    { demo_id: "photon-approved-ledgerline", lead_id: null, lead_name: null, company_name: "Ledgerline", description: "The export that stops at one page.", artifact_id: "photon-approved-artifact-2", name: "photon-approved-ledgerline", content_type: "video/mp4", content_url: "/compare.mp4", created_at: hoursAgo(320), updated_at: hoursAgo(319), approval: { status: "handed_to_agent", approved_at: hoursAgo(6), note: null } },
+    { demo_id: "photon-approved-bloom", lead_id: null, lead_name: null, company_name: "Bloom", description: "The second address line checkout loses.", artifact_id: "photon-approved-artifact-3", name: "photon-approved-bloom", content_type: "video/mp4", content_url: "/case-oruk.mp4", created_at: hoursAgo(340), updated_at: hoursAgo(339), approval: { status: "no_contacts_found", approved_at: hoursAgo(26), note: null } },
+    { demo_id: "photon-approved-kestrel", lead_id: null, lead_name: null, company_name: "Kestrel", description: "The filter the dashboard forgets.", artifact_id: "photon-approved-artifact-4", name: "photon-approved-kestrel", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(360), updated_at: hoursAgo(359), approval: { status: "blocked", approved_at: hoursAgo(50), note: "Kestrel is on your blocklist." } },
+  ];
+  /* The library the reads and the approve writes both act on, so a demo the
+     customer approves is still approved after a segment switch. */
+  const activeLibrary = (): MockDemoRow[] =>
+    mockMode === "library-only"
+      ? libraryOnlyRows
+      : mockMode === "demos-approval" || mockMode === "demos-approve-missing"
+        ? approvalRows
+        : demoRows;
+  /* Approving never fails on a workspace that is only being looked at, so the
+     404 lives behind its own mode rather than behind a query knob. */
+  const approveMissing = mockMode === "demos-approve-missing";
+  const approvalOf = (row: MockDemoRow, hint: string | null): MockApproval => ({
+    /* A name the customer added means there is somebody to send it to, so a
+       demo nobody was found for moves back to waiting. */
+    status: hint || !row.approval ? "queued" : row.approval.status,
+    approved_at: new Date().toISOString(),
+    note: null,
+  });
+  const approveOneApi = (init: RequestInit | undefined, path: string) => {
+    if (approveMissing) return notBuiltYet(path);
+    const key = decodeURIComponent(/\/demos\/(.+)\/approve$/.exec(path)?.[1] ?? "");
+    const row = activeLibrary().find((demo) => demo.demo_id === key);
+    if (!row)
+      return new Response(
+        JSON.stringify({ error: { code: "not_found", detail: "That demo is gone. Refresh the page." } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    let hint: string | null = null;
+    try {
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { contact_hint?: unknown };
+      if (typeof body.contact_hint === "string" && body.contact_hint.trim()) hint = body.contact_hint.trim();
+    } catch { /* No body is the plain approve. */ }
+    const already = row.approval !== null;
+    row.approval = approvalOf(row, hint);
+    return {
+      demo_key: key,
+      status: row.approval.status,
+      approved_at: row.approval.approved_at,
+      already_approved: already,
+      agent_woken: true,
+    };
+  };
+  const approveManyApi = (init: RequestInit | undefined, path: string) => {
+    if (approveMissing) return notBuiltYet(path);
+    let keys: string[] = [];
+    try {
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { demo_keys?: unknown };
+      if (Array.isArray(body.demo_keys)) keys = body.demo_keys.filter((key): key is string => typeof key === "string");
+    } catch { /* An unreadable body accepts nothing. */ }
+    if (keys.length === 0)
+      return new Response(
+        JSON.stringify({ error: { code: "invalid_request", detail: "Pick at least one demo." } }),
+        { status: 422, headers: { "Content-Type": "application/json" } },
+      );
+    const library = activeLibrary();
+    const accepted: string[] = [];
+    const rejected: { demo_key: string; reason: string; code: string }[] = [];
+    for (const key of keys) {
+      const row = library.find((demo) => demo.demo_id === key);
+      if (!row) {
+        rejected.push({ demo_key: key, reason: "That demo is gone.", code: "not_found" });
+        continue;
+      }
+      row.approval = approvalOf(row, null);
+      accepted.push(key);
+    }
+    return { accepted: accepted.length, accepted_keys: accepted, rejected, agent_woken: true };
+  };
   const demosApi = (init?: RequestInit, url?: string) => {
+    const target = new URL(url ?? location.href, location.href);
     if (init?.method === "POST") {
+      if (target.pathname === "/api/v1/dashboard/demos/approve")
+        return approveManyApi(init, target.pathname);
+      if (target.pathname.endsWith("/approve")) return approveOneApi(init, target.pathname);
       if (mockMode === "demos-feedback-error") return new Response(JSON.stringify({ error: { detail: "Your feedback could not be delivered. Please try again." } }), { status: 502 });
       return { delivered: true };
     }
     if (mockMode === "demos-error") return new Response(JSON.stringify({ error: { detail: "Demos could not load." } }), { status: 503 });
-    const query = new URL(url ?? location.href, location.href).searchParams;
+    const query = target.searchParams;
     const q = (query.get("q") ?? "").toLowerCase();
     const limit = Number(query.get("limit") ?? 12);
     const offset = Number(query.get("offset") ?? 0);
-    const library = mockMode === "library-only" ? libraryOnlyRows : demoRows;
-    const rows = mockMode === "demos-empty" ? [] : library.filter((demo) => `${demo.company_name} ${demo.lead_name} ${demo.name}`.toLowerCase().includes(q));
+    const rows = mockMode === "demos-empty" ? [] : activeLibrary().filter((demo) => `${demo.company_name} ${demo.lead_name} ${demo.name}`.toLowerCase().includes(q));
     return { demos: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
   };
 
