@@ -98,37 +98,42 @@ Chromium and iPhone WebKit. `DEMO_TEST_SCREENSHOTS` optionally captures the
 feedback states; `DEMO_TEST_WEBKIT_PATH` selects an installed WebKit executable.
 Mock feedback never sends a Slack message.
 
-## Admin Drift script visualization
+## Admin Drift demo editor
 
-`/dashboard/admin/drift` is platform-admin-only. Photon’s **interactive
-prototype** shows the prompt sequence as five stages (research, story, artwork,
-build, review) and its output as five scenes on a 30-second storyboard. These
-are different views: prompt stages create and review the whole demo; scenes
-are sections of that demo. The fictional Sample Travel frames and timings
-illustrate the interaction, rather than representing a generated run.
+`/dashboard/admin/drift` remains platform-admin-only. Photon's Demo editor
+opens a completed demo from the selected agent's registered private library.
+The video and thumbnail timeline use that exact sealed run. Scene times and
+on-screen wording come from its saved story; scene directions are readable
+summaries of Photon's stable beat contract, not exposed raw prompts.
 
-Click a scene, then a message or card, to edit the visible output. Content
-edits illustrate feedback into Story, palette/background into Artwork, and
-message sizing into Build. The linked stages highlight which prompts would
-be refined and which later outputs would be revisited. The Checks tab lists
-review criteria, explicitly marked as not run. Before/After and storyboard
-playback let an admin inspect the example across scenes.
+Select a moment or scrub the video to inspect its output, then draft a wording,
+visual or pacing change. **Save draft edit stores a note in sessionStorage for
+this tab**; it does not change the video, refine a prompt, call the MCP, send
+Slack feedback or launch generation. Notes are scoped to viewer, agent, run,
+video digest and workflow snapshot, and carry a scene ID and timestamp for the
+future integration. Reloads preserve saved notes; unsaved text is guarded when
+switching agents, demos or moments. No before/after output is fabricated.
 
-**Save changes only saves a local example revision.** No prompts are exposed
-or written, and no generation, API mutation, or Slack message occurs. The MCP
-integration is future work; `studio-model.ts` isolates the sample clip changes
-and illustrative feedback mapping, without defining a backend API contract.
-Reloading or switching agents resets the example. Drafts survive view-tab
-changes; switching agents asks before discarding unsaved edits.
+The read-only backend adapter lives at
+`GET /api/v1/admin/drift/agents/{agent_id}/demos` and
+`GET /api/v1/admin/drift/agents/{agent_id}/demos/{run_id}`.
+It validates the sealed video/review/workflow relationship and allowlists
+output fields. Video bytes use the existing authenticated staff route and
+are decoded once into local Blob URLs and canvas thumbnails. Customer media
+is never included in the frontend bundle or public assets. Missing evidence
+has an explicit error state; no generic storyboard substitutes for it.
 
-Run history remains a separate read-only view of recorded steps, review
-results, and corrections. Unrecorded steps stay explicitly unrecorded. Other
-agents keep their process maps; the visual editing prototype is Photon only.
+Run history remains a separate read-only view for every agent. Mock mode
+`?mock=admin` shows the editor's empty state and sample run history; it never
+fetches customer media. Use a signed-in platform admin for real demo review.
 
-Preview `/dashboard/admin/drift?mock=admin`. Run `npm run test:drift` against
-a built preview on port 5182 (`DRIFT_TEST_BASE_URL` overrides it). Tests cover
-Chromium and iPhone WebKit: output edits, feedback mapping, local revisions,
-comparison, playback, absence of writes, agent scope, history, keyboard and
+Run `npm run test:drift` against a built preview on port 5182
+(`DRIFT_TEST_BASE_URL` overrides it). The committed playback fixture is a
+small synthetic two-color video. To verify real footage locally, set
+`DRIFT_TEST_TIMELINE` to the safe projection JSON and `DRIFT_TEST_VIDEO` to
+its matching private MP4; do not commit those files. Chromium and iPhone WebKit
+checks cover frame extraction, playback, scene mapping, draft version scope,
+reloads, unsaved guards, history, access/empty/error states, no API writes and
 accessibility. `DRIFT_TEST_SCREENSHOTS` captures evidence;
 `DRIFT_TEST_WEBKIT_EXECUTABLE` selects an installed WebKit binary.
 

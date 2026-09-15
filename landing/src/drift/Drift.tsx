@@ -130,10 +130,7 @@ function DriftView({ user }: { user: User }) {
           <header className="drift-heading">
             <div>
               <h1>Drift script</h1>
-              <p>
-                See how prompts become a demo. Refine the script by editing its
-                output.
-              </p>
+              <p>Review a demo. Shape what comes next.</p>
             </div>
             {overview && (
               <label className="workflow-agent-picker">
@@ -155,8 +152,8 @@ function DriftView({ user }: { user: User }) {
           {pendingAgent && (
             <div className="workflow-notice" role="alert">
               <p>
-                Switching agents resets this local example, including your
-                unsaved clip edits.
+                Switching agents discards the edit request you haven’t saved
+                yet.
               </p>
               <div className="workflow-save-actions">
                 <button
@@ -192,6 +189,7 @@ function DriftView({ user }: { user: User }) {
             <AgentWorkspace
               key={agentId}
               agentId={agentId}
+              viewerId={user.id}
               overview={overview}
               onDirty={handleDirty}
             />
@@ -209,10 +207,12 @@ function DriftView({ user }: { user: User }) {
 
 function AgentWorkspace({
   agentId,
+  viewerId,
   overview,
   onDirty,
 }: {
   agentId: string;
+  viewerId: string;
   overview: DriftOverview;
   onDirty: (dirty: boolean) => void;
 }) {
@@ -280,7 +280,7 @@ function AgentWorkspace({
           aria-controls="workflow-plan-panel"
           onClick={() => setView("plan")}
         >
-          Visualize script
+          Demo editor
         </button>
         <button
           id="runs-tab"
@@ -300,13 +300,18 @@ function AgentWorkspace({
         hidden={view !== "plan"}
       >
         {agentId === "photon" ? (
-          <ScriptStudio onDirty={onDirty} active={view === "plan"} />
+          <ScriptStudio
+            onDirty={onDirty}
+            active={view === "plan"}
+            agentId={agentId}
+            viewerId={viewerId}
+          />
         ) : (
           <div className="workflow-empty">
-            <h2>The visual prototype starts with Photon</h2>
+            <h2>The demo editor starts with Photon</h2>
             <p>
-              Choose Photon above to explore the prompt sequence and edit a
-              sample clip.
+              Choose Photon above to review a completed demo and its recorded
+              story.
             </p>
             <button className="workflow-button" onClick={() => setView("runs")}>
               View run history

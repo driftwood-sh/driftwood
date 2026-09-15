@@ -1,4 +1,4 @@
-import { photonPrototypeFlow } from "./drift/studio-model.ts";
+import { photonMockFlow } from "./drift/mock-flow.ts";
 import { parsePolicy, reviewerFor, type ApprovalMode, type ApprovalPolicy } from "./approvals/model.ts";
 import { initializeMockMode, mockBlockedResponse } from "./mock-mode.ts";
 import { resendRefusalMessage, resendWaitMinutes } from "./team/team-model.ts";
@@ -2052,10 +2052,12 @@ if (mockMode) {
       { agent_id: "autosana", states: { done: 1, quarantined: 1, running: 1 }, total: 3, in_flight: 1 },
       { agent_id: "oruk", states: {}, total: 0, in_flight: 0 },
     ],
-    flows: { behavior_ci_demo: driftFlow, photon_demo: photonPrototypeFlow },
+    flows: { behavior_ci_demo: driftFlow, photon_demo: photonMockFlow },
     tasks: ["behavior_ci_demo", "photon_demo"],
   };
   const driftAgentRuns = (_init?: RequestInit, url?: string) => {
+    // Mock mode never loads private customer media.
+    if (url?.includes("/demos")) return { demos: [] };
     const agentId = decodeURIComponent(url?.split("/agents/")[1]?.split("/")[0]?.split("?")[0] ?? "");
     return {
       agent_id: agentId,

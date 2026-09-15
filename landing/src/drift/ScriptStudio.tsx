@@ -1,56 +1,254 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import ScenePhone from "./ScenePhone";
 import {
-  clipChanges,
-  FIELD_LABELS,
-  FIELD_PROMPT,
-  INITIAL_CLIP,
-  PROMPTS,
-  refinementPath,
-  SCENES,
-  sceneAt,
-  timeLabel,
-  type Clip,
-  type ClipChange,
-  type ClipField,
-  type PromptId,
-} from "./studio-model";
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  clockLabel,
+  demoChoices,
+  demoTimeline,
+  readEdits,
+  sceneAtTime,
+  type DemoChoice,
+  type DemoEdit,
+  type DemoScene,
+  type DemoTimeline,
+  type EditTarget,
+} from "./demo-timeline";
+import { useDemoMedia } from "./useDemoMedia";
 import "./studio.css";
-
-type EditorTab = "content" | "look" | "checks" | "step";
 
 export default function ScriptStudio({
   onDirty,
   active,
+  agentId,
+  viewerId,
 }: {
   onDirty: (dirty: boolean) => void;
   active: boolean;
+  agentId: string;
+  viewerId: string;
 }) {
-  const [clip, setClip] = useState<Clip>({ ...INITIAL_CLIP });
-  const [saved, setSaved] = useState<Clip>({ ...INITIAL_CLIP });
-  const [previous, setPrevious] = useState<Clip>({ ...INITIAL_CLIP });
-  const [receipt, setReceipt] = useState<ClipChange[]>([]);
-  const [revision, setRevision] = useState(1);
-  const [time, setTime] = useState(1);
-  const [playing, setPlaying] = useState(false);
-  const [before, setBefore] = useState(false);
-  const [promptId, setPromptId] = useState<PromptId>("story");
-  const [editorTab, setEditorTab] = useState<EditorTab>("content");
-  const [selectedField, setSelectedField] = useState<ClipField>("request");
-  const editorRef = useRef<HTMLElement>(null);
-  const previewRef = useRef<HTMLElement>(null);
-  const scene = sceneAt(time);
-  const prompt = PROMPTS.find((item) => item.id === promptId)!;
-  const changes = clipChanges(saved, clip);
-  const dirty = changes.length > 0;
-  const invalid = SCENES.flatMap((item) => item.fields).some(
-    (field) => !clip[field.key].trim(),
+  const [choices, setChoices] = useState<DemoChoice[] | null>(null);
+  const [selected, setSelected] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState("");
+  const handleDirty = useCallback((value: boolean) => {
+    setDirty(value);
+    if (!value) setPending("");
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    demoChoices(agentId, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setChoices(data.demos);
+        setSelected((current) =>
+          data.demos.some((item) => item.run_id === current)
+            ? current
+            : (data.demos[0]?.run_id ?? ""),
+        );
+        setError(null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setError("Completed demos could not be loaded.");
+      });
+    return () => controller.abort();
+  }, [agentId, revision]);
+  useLayoutEffect(() => {
+    onDirty(dirty);
+  }, [dirty, onDirty]);
+  return (
+    <section className="demo-studio" aria-label="Photon demo editor">
+      <header className="demo-studio-heading">
+        <div>
+          <h2>Your demo, step by step</h2>
+          <p>
+            Select a moment. See its direction and tell us what you’d change.
+          </p>
+        </div>
+        {choices && choices.length > 0 && (
+          <label className="demo-select">
+            Demo
+            <select
+              aria-label="Demo"
+              value={selected}
+              onChange={(event) => {
+                if (dirty) setPending(event.target.value);
+                else setSelected(event.target.value);
+              }}
+            >
+              {choices.map((item) => (
+                <option key={item.run_id} value={item.run_id}>
+                  {item.company_name} ·{" "}
+                  {new Date(item.created_at).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </header>
+      {pending && (
+        <div className="workflow-notice" role="alert">
+          <p>
+            Save this edit request as a draft before switching, or discard it.
+          </p>
+          <div className="workflow-save-actions">
+            <button className="workflow-button" onClick={() => setPending("")}>
+              Keep editing
+            </button>
+            <button
+              className="workflow-button"
+              onClick={() => {
+                setDirty(false);
+                setSelected(pending);
+                setPending("");
+              }}
+            >
+              Discard and switch demo
+            </button>
+          </div>
+        </div>
+      )}
+      {error ? (
+        <div className="workflow-empty" role="alert">
+          <p>{error}</p>
+          <button
+            className="workflow-button"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            Try again
+          </button>
+        </div>
+      ) : choices?.length === 0 ? (
+        <div className="workflow-empty">
+          <h3>No completed demos yet</h3>
+          <p>
+            A completed Photon demo is needed to open its video and recorded
+            story here.
+          </p>
+          <button
+            className="workflow-button"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            Refresh demos
+          </button>
+        </div>
+      ) : selected ? (
+        <LoadDemo
+          key={selected}
+          id={selected}
+          agentId={agentId}
+          viewerId={viewerId}
+          active={active}
+          onDirty={handleDirty}
+        />
+      ) : (
+        <EditorSkeleton />
+      )}
+    </section>
   );
-  const displayedChanges = dirty ? changes : receipt;
-  const path = refinementPath(displayedChanges);
-  const visibleClip = before ? (dirty ? saved : previous) : clip;
-  const isPlaying = playing && time < 30;
+}
 
+function LoadDemo({
+  id,
+  agentId,
+  viewerId,
+  active,
+  onDirty,
+}: {
+  id: string;
+  agentId: string;
+  viewerId: string;
+  active: boolean;
+  onDirty: (value: boolean) => void;
+}) {
+  const [demo, setDemo] = useState<DemoTimeline | null>(null);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    demoTimeline(agentId, id, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setDemo(data);
+          setError(false);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      });
+    return () => controller.abort();
+  }, [agentId, id, attempt]);
+  if (error)
+    return (
+      <div className="workflow-empty" role="alert">
+        <h3>This demo’s recorded story could not be loaded</h3>
+        <p>Choose another demo, or try again.</p>
+        <button
+          className="workflow-button"
+          onClick={() => setAttempt((value) => value + 1)}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  return demo ? (
+    <RecordedDemo
+      key={`${demo.video_version}:${attempt}`}
+      demo={demo}
+      active={active}
+      storageKey={`drift-demo-edits:v1:${viewerId}:${agentId}:${id}:${demo.video_version}`}
+      onDirty={onDirty}
+      retry={() => setAttempt((value) => value + 1)}
+    />
+  ) : (
+    <EditorSkeleton />
+  );
+}
+
+function RecordedDemo({
+  demo,
+  active,
+  storageKey,
+  onDirty,
+  retry,
+}: {
+  demo: DemoTimeline;
+  active: boolean;
+  storageKey: string;
+  onDirty: (value: boolean) => void;
+  retry: () => void;
+}) {
+  const media = useDemoMedia(demo);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
+  const feedbackRef = useRef<HTMLTextAreaElement>(null);
+  const [sceneId, setSceneId] = useState(demo.scenes[0].id);
+  const [time, setTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [target, setTarget] = useState<EditTarget>("content");
+  const [message, setMessage] = useState("");
+  const [drafts, setDrafts] = useState<DemoEdit[]>(() => {
+    try {
+      return readEdits(sessionStorage.getItem(storageKey), demo);
+    } catch {
+      return [];
+    }
+  });
+  const [notice, setNotice] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const scene = demo.scenes.find((item) => item.id === sceneId)!;
+  const sceneDrafts = drafts.filter((item) => item.scene_id === scene.id);
+  const dirty = message.trim().length > 0;
   useLayoutEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
@@ -61,703 +259,377 @@ export default function ScriptStudio({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   useEffect(() => {
-    if (!isPlaying || !active) return;
-    const timer = setInterval(
-      () => setTime((current) => Math.min(30, current + 0.25)),
-      250,
-    );
+    if (!active) videoRef.current?.pause();
     const pause = () => {
-      if (document.hidden) setPlaying(false);
+      if (document.hidden) videoRef.current?.pause();
     };
     document.addEventListener("visibilitychange", pause);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", pause);
-    };
-  }, [isPlaying, active]);
-
-  function update<K extends ClipField>(field: K, value: Clip[K]) {
-    setClip((current) => ({ ...current, [field]: value }));
-    setBefore(false);
-    setPlaying(false);
-    setPromptId(FIELD_PROMPT[field]);
-  }
-  function selectScene(id: string) {
-    const selected = SCENES.find((item) => item.id === id)!;
-    setTime(selected.start);
-    setPlaying(false);
-    setBefore(false);
-    setSelectedField(selected.fields[0].key);
-    setEditorTab("content");
-    setPromptId("story");
-    if (window.matchMedia("(max-width: 900px)").matches)
-      requestAnimationFrame(() =>
-        previewRef.current?.scrollIntoView({ block: "start" }),
+    return () => document.removeEventListener("visibilitychange", pause);
+  }, [active]);
+  function selectScene(next: DemoScene) {
+    if (dirty && next.id !== sceneId) {
+      setNotice(
+        "Save or discard this edit request before selecting another moment.",
       );
-  }
-  function selectTarget(field: ClipField) {
-    const owner = SCENES.find((item) =>
-      item.fields.some((value) => value.key === field),
-    );
-    if (owner && owner.id !== scene.id) setTime(owner.start);
-    setSelectedField(field);
-    setEditorTab("content");
-    setBefore(false);
-    setPlaying(false);
-    setPromptId(FIELD_PROMPT[field]);
-    requestAnimationFrame(() => {
-      const input = document.getElementById(`clip-field-${field}`);
-      input?.focus({ preventScroll: true });
-      if (window.matchMedia("(max-width: 900px)").matches)
-        editorRef.current?.scrollIntoView({ block: "start" });
-    });
-  }
-  function selectPrompt(id: PromptId) {
-    setPromptId(id);
-    setPlaying(false);
-    setEditorTab(
-      id === "artwork" || id === "build"
-        ? "look"
-        : id === "review"
-          ? "checks"
-          : id === "research"
-            ? "step"
-            : "content",
-    );
+      feedbackRef.current?.focus();
+      return;
+    }
+    videoRef.current?.pause();
+    setSceneId(next.id);
+    setNotice("");
+    setTime(next.preview_time);
+    if (videoRef.current) videoRef.current.currentTime = next.preview_time;
+    if (window.matchMedia("(max-width: 800px)").matches)
+      previewRef.current?.scrollIntoView({ block: "start" });
   }
   function save() {
-    if (!dirty || invalid) return;
-    setPrevious({ ...saved });
-    setSaved({ ...clip });
-    setReceipt(changes);
-    setRevision((value) => value + 1);
-    setBefore(false);
-    setPlaying(false);
+    if (!dirty) return;
+    const next: DemoEdit = {
+      id: crypto.randomUUID(),
+      run_id: demo.run_id,
+      video_version: demo.video_version,
+      workflow_version: demo.workflow_version,
+      scene_id: scene.id,
+      timestamp: time,
+      target,
+      message: message.trim(),
+    };
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify([...drafts, next]));
+      setDrafts((current) => [...current, next]);
+      setMessage("");
+      setSaveError("");
+      setNotice("Draft saved for this tab. The video has not changed.");
+    } catch {
+      setSaveError(
+        "Your browser could not save this draft. Your text is still here.",
+      );
+    }
   }
-  function reset() {
-    setClip({ ...INITIAL_CLIP });
-    setSaved({ ...INITIAL_CLIP });
-    setPrevious({ ...INITIAL_CLIP });
-    setReceipt([]);
-    setRevision(1);
-    setBefore(false);
-    setPlaying(false);
-    setTime(1);
-    setSelectedField("request");
-    setPromptId("story");
-    setEditorTab("content");
+  function removeDraft(id: string) {
+    const next = drafts.filter((item) => item.id !== id);
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(next));
+      setDrafts(next);
+      setNotice("Draft removed.");
+    } catch {
+      setSaveError("This draft could not be removed. Try again.");
+    }
   }
+  const canPlay = Boolean(media.source) && !dirty;
   return (
-    <section className="script-studio" aria-label="Photon script visualization">
-      <div className="studio-prototype">
-        <span className="studio-prototype-label">Interactive prototype</span>
-        <p>
-          Sample frames and local edits. Prompt refinement and clip generation
-          will connect through the MCP.
-        </p>
-        <button className="workflow-button is-quiet" onClick={reset}>
-          Reset example
-        </button>
-      </div>
-      <section className="studio-chain" aria-label="Prompt sequence">
-        <div className="studio-section-heading">
-          <div>
-            <h2>Photon’s prompt sequence</h2>
-            <span>Each output becomes the next step’s input.</span>
-            <span className="studio-mobile-hint">
-              Swipe across all 5 steps →
-            </span>
-          </div>
-          <span className="studio-subtle">5 prompt stages</span>
-        </div>
-        <ol className="studio-prompt-list">
-          {PROMPTS.map((item, index) => {
-            const affected = path.find((step) => step.id === item.id);
-            return (
-              <li key={item.id}>
-                <button
-                  className={`studio-prompt ${promptId === item.id ? "is-selected" : ""} ${affected ? "is-affected" : ""}`}
-                  aria-pressed={promptId === item.id}
-                  onClick={() => selectPrompt(item.id)}
-                >
-                  <span className="studio-prompt-top">
-                    <span>
-                      {String(index + 1).padStart(2, "0")} /{" "}
-                      {item.id === "artwork" || item.id === "review"
-                        ? "Prompts"
-                        : "Prompt"}
-                    </span>
-                    {affected && (
-                      <span
-                        className="studio-impact-dot"
-                        title={
-                          affected.action === "refine"
-                            ? "This prompt would be refined by your edits."
-                            : "This downstream step would be revisited."
-                        }
-                      />
-                    )}
-                  </span>
-                  <strong>{item.name}</strong>
-                  <span>{item.purpose}</span>
-                  <span className="studio-prompt-output">↓ {item.output}</span>
-                  <small>
-                    {affected
-                      ? affected.action === "refine"
-                        ? "Would refine"
-                        : "Would revisit"
-                      : "View this step"}
-                  </small>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </section>
-
-      <div
-        className="studio-loop"
-        aria-label="How clip edits refine the script"
-      >
-        <span>
-          <b>1</b> Select a scene
-        </span>
-        <i aria-hidden="true">→</i>
-        <span>
-          <b>2</b> Make a clip edit
-        </span>
-        <i aria-hidden="true">↶</i>
-        <span>
-          <b>3</b> Refine the linked prompts
-        </span>
-        <i aria-hidden="true">→</i>
-        <span>
-          <b>4</b> Preview again
-        </span>
-      </div>
-
-      <div className="studio-workbench">
-        <section
-          className="studio-preview"
-          ref={previewRef}
-          aria-label="Sample clip preview"
-        >
-          <header className="studio-preview-heading">
-            <div>
-              <span className="studio-eyebrow">
-                Sample Travel / weekend escape
-              </span>
-              <h3>{scene.name}</h3>
-            </div>
-            <div className="studio-compare" aria-label="Compare clip versions">
+    <>
+      <section className="recorded-timeline" aria-label="Demo timeline">
+        <header>
+          <h3>The full demo</h3>
+          <span>
+            {demo.scenes.length} moments · {drafts.length} draft{" "}
+            {drafts.length === 1 ? "edit" : "edits"}
+          </span>
+        </header>
+        <ol>
+          {demo.scenes.map((item, index) => (
+            <li key={item.id}>
               <button
-                aria-pressed={before}
-                disabled={!dirty && !receipt.length}
-                title={
-                  !dirty && !receipt.length
-                    ? "Make an edit to compare it with the original."
-                    : "Show the version before these edits."
-                }
-                onClick={() => {
-                  setBefore(true);
-                  setPlaying(false);
-                }}
+                aria-label={`${item.label}, ${clockLabel(item.start)} to ${clockLabel(item.end)}`}
+                aria-pressed={scene.id === item.id}
+                onClick={() => selectScene(item)}
               >
-                Before
+                <div className="recorded-thumbnail">
+                  {media.frames[item.id] ? (
+                    <img src={media.frames[item.id]} alt="" />
+                  ) : (
+                    <span className="recorded-thumbnail-placeholder" />
+                  )}
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  {drafts.some((edit) => edit.scene_id === item.id) && (
+                    <i aria-label="Has draft edits" />
+                  )}
+                </div>
+                <strong>{item.label}</strong>
+                <small>
+                  {clockLabel(item.start)}–{clockLabel(item.end)}
+                </small>
               </button>
-              <button aria-pressed={!before} onClick={() => setBefore(false)}>
-                After
-              </button>
+            </li>
+          ))}
+        </ol>
+        <p>
+          {media.frameError
+            ? "Some frame previews could not be read. You can still select a moment to watch it."
+            : "Frames from this video. Scene timing and wording come from its saved story."}
+        </p>
+      </section>
+      <div className="recorded-demo-layout">
+        <section
+          className="recorded-preview"
+          ref={previewRef}
+          aria-label="Recorded demo video"
+        >
+          <div className="recorded-title">
+            <div>
+              <span>Photon demo</span>
+              <h3>{demo.title || demo.company_name}</h3>
             </div>
-          </header>
-          <div
-            className={`studio-preview-canvas palette-${visibleClip.palette}`}
-          >
-            <div className="studio-canvas-caption">
-              <span>
-                {before
-                  ? "Before edits"
-                  : dirty
-                    ? "Unsaved clip edits"
-                    : `Example v${revision}`}
-              </span>
-              <span>Illustrative frame</span>
-            </div>
-            <ScenePhone
-              clip={visibleClip}
-              scene={scene.id}
-              selectedField={selectedField}
-              onSelect={before || isPlaying ? undefined : selectTarget}
-            />
-            <p className="studio-canvas-hint">
-              {before
-                ? "The previous version at the same moment."
-                : "Click a message or card to edit the clip."}
-            </p>
+            <span>{clockLabel(demo.duration)}</span>
           </div>
-          <div className="studio-playback">
+          <div className="recorded-video-canvas">
+            {media.error ? (
+              <div className="recorded-media-status" role="alert">
+                <p>{media.error}</p>
+                <button className="workflow-button" onClick={retry}>
+                  Reload video
+                </button>
+              </div>
+            ) : !media.source ? (
+              <div className="recorded-media-status" role="status">
+                <div className="recorded-phone-skeleton" />
+                <span>Loading the recorded video…</span>
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                src={media.source}
+                playsInline
+                muted
+                preload="auto"
+                aria-label={`Recorded demo for ${demo.company_name}`}
+                onLoadedMetadata={() => {
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = scene.preview_time;
+                    setTime(scene.preview_time);
+                  }
+                }}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onTimeUpdate={(event) => {
+                  const at = event.currentTarget.currentTime;
+                  setTime(at);
+                  if (!event.currentTarget.paused && !dirty)
+                    setSceneId(sceneAtTime(demo.scenes, at)!.id);
+                }}
+                onError={() =>
+                  setNotice("Playback is unavailable. Try reloading the video.")
+                }
+              />
+            )}
+          </div>
+          <div className="recorded-playback">
             <button
-              className="workflow-button studio-play"
-              aria-label={isPlaying ? "Pause storyboard" : "Play storyboard"}
+              className="workflow-button recorded-play"
+              aria-label={playing ? "Pause demo" : "Play demo"}
+              disabled={!canPlay}
+              title={
+                !media.source
+                  ? "Available when the video loads."
+                  : dirty
+                    ? "Save or discard this edit request before playing."
+                    : undefined
+              }
               onClick={() => {
-                if (time >= 30) setTime(0);
-                setPlaying(!isPlaying);
+                const video = videoRef.current;
+                if (!video) return;
+                if (video.paused) {
+                  if (video.currentTime >= demo.duration - 0.05)
+                    video.currentTime = 0;
+                  void video
+                    .play()
+                    .catch(() =>
+                      setNotice("Playback could not start. Try again."),
+                    );
+                } else video.pause();
               }}
             >
-              {isPlaying ? "Ⅱ" : "▶"}
+              {playing ? "Ⅱ" : "▶"}
             </button>
             <input
               type="range"
               min="0"
-              max="30"
-              step="0.25"
+              max={demo.duration}
+              step="0.05"
               value={time}
-              aria-label="Storyboard playhead"
-              aria-valuetext={`${timeLabel(time)} of 0:30, ${scene.name}`}
+              aria-label="Demo playhead"
+              aria-valuetext={`${clockLabel(time)} of ${clockLabel(demo.duration)}`}
+              disabled={!canPlay}
+              title={
+                !canPlay
+                  ? dirty
+                    ? "Save or discard your edit request before moving to another moment."
+                    : "Available when the video loads."
+                  : undefined
+              }
               onChange={(event) => {
-                setTime(Number(event.target.value));
-                setPlaying(false);
+                const at = Number(event.target.value);
+                videoRef.current?.pause();
+                if (videoRef.current) videoRef.current.currentTime = at;
+                setTime(at);
+                setSceneId(sceneAtTime(demo.scenes, at)!.id);
               }}
             />
             <span>
-              {timeLabel(time)} <span>/ 0:30</span>
+              {clockLabel(time)} <span>/ {clockLabel(demo.duration)}</span>
             </span>
-            <span className="studio-playback-label">Storyboard playback</span>
           </div>
-          <div className="studio-filmstrip-heading">
-            <strong>Clip timeline</strong>
-            <span>Five sections of one continuous demo</span>
-          </div>
-          <ol className="studio-filmstrip" aria-label="Clip scenes">
-            {SCENES.map((item, index) => (
-              <li key={item.id}>
-                <button
-                  aria-label={`${item.name}, ${timeLabel(item.start)} to ${timeLabel(item.end)}`}
-                  aria-pressed={scene.id === item.id}
-                  onClick={() => selectScene(item.id)}
-                >
-                  <div
-                    className={`studio-thumb palette-${clip.palette}`}
-                    aria-hidden="true"
-                  >
-                    <div>
-                      <ScenePhone clip={clip} scene={item.id} />
-                    </div>
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                  </div>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {timeLabel(item.start)}–{timeLabel(item.end)}
-                  </small>
-                </button>
-              </li>
-            ))}
-          </ol>
         </section>
-
-        <aside
-          className="studio-editor"
-          ref={editorRef}
-          aria-label="Clip editing controls"
-        >
+        <aside className="recorded-inspector" aria-label="Selected moment">
           <header>
-            <span className="studio-eyebrow">Edit the output</span>
-            <h3>Shape this clip</h3>
-            <p>Make a small change. See which prompts it feeds back into.</p>
-            <button
-              className="studio-mobile-frame-link"
-              onClick={() =>
-                previewRef.current?.scrollIntoView({ block: "start" })
-              }
-            >
-              View edited frame ↑
-            </button>
+            <span>
+              {clockLabel(scene.start)}–{clockLabel(scene.end)}
+            </span>
+            <h3>{scene.label}</h3>
           </header>
-          <div
-            className="studio-editor-tabs"
-            role="tablist"
-            aria-label="Clip controls"
-            onKeyDown={(event) => {
-              if (
-                !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
-              )
-                return;
-              event.preventDefault();
-              const tabs: EditorTab[] = ["content", "look", "checks", "step"];
-              const index = tabs.indexOf(editorTab);
-              const next =
-                event.key === "Home"
-                  ? tabs[0]
-                  : event.key === "End"
-                    ? tabs.at(-1)!
-                    : tabs[(index + (event.key === "ArrowLeft" ? 3 : 1)) % 4];
-              setEditorTab(next);
-              document.getElementById(`studio-tab-${next}`)?.focus();
-            }}
-          >
-            {(
-              [
-                ["content", "Content"],
-                ["look", "Look"],
-                ["checks", "Checks"],
-                ["step", "Step details"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                id={`studio-tab-${id}`}
-                key={id}
-                role="tab"
-                tabIndex={editorTab === id ? 0 : -1}
-                aria-selected={editorTab === id}
-                aria-controls={`studio-panel-${id}`}
-                onClick={() => setEditorTab(id)}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="recorded-direction">
+            <span>Scene direction</span>
+            <p>{scene.direction}</p>
           </div>
-          <div className="studio-editor-body">
-            <div
-              id="studio-panel-content"
-              role="tabpanel"
-              aria-labelledby="studio-tab-content"
-              hidden={editorTab !== "content"}
-            >
-              <div className="studio-editor-scene">
-                <span>
-                  {timeLabel(scene.start)}–{timeLabel(scene.end)}
-                </span>
-                <strong>{scene.name}</strong>
-                <p>{scene.description}</p>
-              </div>
-              {scene.fields.map((field) => (
-                <div className="studio-field" key={field.key}>
-                  <label htmlFor={`clip-field-${field.key}`}>
-                    {field.label}
-                  </label>
-                  <textarea
-                    id={`clip-field-${field.key}`}
-                    rows={field.max > 48 ? 3 : 2}
-                    value={clip[field.key]}
-                    maxLength={field.max}
-                    onFocus={() => setSelectedField(field.key)}
-                    onChange={(event) => update(field.key, event.target.value)}
-                  />
-                  <small>
-                    {clip[field.key].length}/{field.max}
-                    {field.key === "destination"
-                      ? " · Carries through choices, result and checkout"
-                      : ""}
-                  </small>
+          <div className="recorded-output">
+            <h4>In this demo</h4>
+            {scene.content.length ? (
+              scene.content.map((item) => (
+                <div key={item.field}>
+                  <span>{item.label}</span>
+                  <p>{item.text}</p>
                 </div>
+              ))
+            ) : (
+              <p className="recorded-visual-output">
+                {scene.id === "heart"
+                  ? "The customer reacts to the result."
+                  : scene.id === "hold"
+                    ? "The final state stays on screen."
+                    : "Watch this moment to see the visual result."}
+              </p>
+            )}
+          </div>
+          <div className="recorded-feedback">
+            <label htmlFor="demo-change-request">What would you change?</label>
+            <div
+              className="recorded-targets"
+              role="group"
+              aria-label="Edit focus"
+            >
+              {(
+                [
+                  ["content", "Wording"],
+                  ["visuals", "Visuals"],
+                  ["timing", "Pacing"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  aria-pressed={target === value}
+                  onClick={() => {
+                    videoRef.current?.pause();
+                    setTarget(value);
+                    feedbackRef.current?.focus();
+                  }}
+                >
+                  {label}
+                </button>
               ))}
-              <div className="studio-quick-edits">
-                <span>Try a small edit</span>
-                {scene.id === "opening" ? (
-                  <>
-                    <button
-                      onClick={() =>
-                        update("request", "Plan me a sunny weekend.")
-                      }
-                    >
-                      Shorten the message
-                    </button>
-                    <button
-                      onClick={() =>
-                        update(
-                          "request",
-                          "I need a little sunshine this weekend.",
-                        )
-                      }
-                    >
-                      Make it more casual
-                    </button>
-                  </>
-                ) : scene.id === "reply" ? (
-                  <button
-                    onClick={() =>
-                      update("reply", "Three sunny cities. All under $500.")
-                    }
-                  >
-                    Make the reply tighter
-                  </button>
-                ) : scene.id === "choices" ? (
-                  <button onClick={() => update("destination", "Porto")}>
-                    Try Porto instead
-                  </button>
-                ) : scene.id === "result" ? (
-                  <button
-                    onClick={() =>
-                      update("resultTitle", "A little escape. All sorted.")
-                    }
-                  >
-                    Make the headline warmer
-                  </button>
-                ) : (
-                  <button
-                    onClick={() =>
-                      update("closing", "Shall we make it happen?")
-                    }
-                  >
-                    Soften the closing message
-                  </button>
-                )}
-              </div>
             </div>
-            <div
-              id="studio-panel-look"
-              role="tabpanel"
-              aria-labelledby="studio-tab-look"
-              hidden={editorTab !== "look"}
-            >
-              <div className="studio-editor-scene">
-                <strong>Look & feel</strong>
-                <p>These visual choices carry through every scene.</p>
-              </div>
-              <fieldset className="studio-field">
-                <legend>Color palette</legend>
-                <div className="studio-swatches">
-                  {(["ocean", "sunset", "sage"] as const).map((value) => (
-                    <button
-                      key={value}
-                      className={`palette-${value}`}
-                      aria-pressed={clip.palette === value}
-                      onClick={() => update("palette", value)}
-                    >
-                      <i />
-                      <span>{value[0].toUpperCase() + value.slice(1)}</span>
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <fieldset className="studio-field">
-                <legend>Background detail</legend>
-                <div className="studio-options">
-                  {(["soft", "vivid"] as const).map((value) => (
-                    <button
-                      key={value}
-                      aria-pressed={clip.background === value}
-                      onClick={() => update("background", value)}
-                    >
-                      {value === "soft" ? "Calmer" : "More texture"}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <fieldset className="studio-field">
-                <legend>Message size</legend>
-                <div className="studio-options">
-                  {(["standard", "large"] as const).map((value) => (
-                    <button
-                      key={value}
-                      aria-pressed={clip.textSize === value}
-                      onClick={() => update("textSize", value)}
-                    >
-                      {value === "standard" ? "Standard" : "Larger text"}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <p className="studio-field-help">
-                Palette and background edits feed back to the artwork prompts.
-                Message sizing feeds back to the build prompt.
-              </p>
-            </div>
-            <div
-              id="studio-panel-checks"
-              role="tabpanel"
-              aria-labelledby="studio-tab-checks"
-              hidden={editorTab !== "checks"}
-            >
-              <div className="studio-editor-scene">
-                <strong>What the next render checks</strong>
-                <p>
-                  Shown as a checklist here. No AI reviews have run in this
-                  prototype.
-                </p>
-              </div>
-              <ul className="studio-checks">
-                {[
-                  "The story matches the company brief",
-                  "Messages fit and stay readable",
-                  "The visuals feel consistent",
-                  "Choices and payment work",
-                  "The complete clip has a clear pace",
-                ].map((check) => (
-                  <li key={check}>
-                    <span aria-hidden="true">○</span>
-                    <span>{check}</span>
-                    <small>Not run</small>
-                  </li>
-                ))}
-              </ul>
-              <p className="studio-field-help">
-                Frames help review layout and branding. The full clip is needed
-                to check motion, timing and interactions.
-              </p>
-            </div>
-            <div
-              id="studio-panel-step"
-              role="tabpanel"
-              aria-labelledby="studio-tab-step"
-              hidden={editorTab !== "step"}
-            >
-              <div className="studio-editor-scene">
-                <strong>
-                  {prompt.name} prompt
-                  {prompt.id === "artwork" || prompt.id === "review" ? "s" : ""}
-                </strong>
-                <p>{prompt.detail}</p>
-              </div>
-              <dl className="studio-step-io">
-                <div>
-                  <dt>Receives</dt>
-                  <dd>{prompt.input}</dd>
-                </div>
-                <div>
-                  <dt>Produces</dt>
-                  <dd>{prompt.output}</dd>
-                </div>
-              </dl>
-              <h4>What matters here</h4>
-              <ul className="studio-step-checks">
-                {prompt.checks.map((check) => (
-                  <li key={check}>{check}</li>
-                ))}
-              </ul>
-              {prompt.id === "research" && (
-                <div className="studio-sample-brief">
-                  <span>Example brief</span>
-                  <strong>Sample Travel</strong>
-                  <p>
-                    A travel service helping people find a weekend escape with
-                    flights and a place to stay.
-                  </p>
-                  <small>
-                    Audience: weekend travelers
-                    <br />
-                    Journey: discover → choose → book
-                  </small>
-                </div>
+            <textarea
+              id="demo-change-request"
+              ref={feedbackRef}
+              rows={3}
+              maxLength={1500}
+              value={message}
+              placeholder={
+                target === "content"
+                  ? "e.g. Make this reply shorter and more direct."
+                  : target === "visuals"
+                    ? "e.g. Make the background quieter."
+                    : "e.g. Give these choices more time on screen."
+              }
+              onFocus={() => videoRef.current?.pause()}
+              onChange={(event) => {
+                setMessage(event.target.value);
+                setNotice("");
+                setSaveError("");
+              }}
+            />
+            <div className="recorded-feedback-actions">
+              <button
+                className="workflow-button is-primary"
+                disabled={!dirty}
+                title={
+                  !dirty ? "Describe a change to this moment first." : undefined
+                }
+                onClick={save}
+              >
+                Save draft edit
+              </button>
+              {dirty && (
+                <button
+                  className="workflow-button is-quiet"
+                  onClick={() => {
+                    setMessage("");
+                    setNotice("");
+                  }}
+                >
+                  Discard
+                </button>
               )}
             </div>
+            <p className="recorded-draft-hint">
+              Draft edits stay in this tab. Generating a revised video isn’t
+              connected yet.
+            </p>
+            {notice && (
+              <p role="status" className="recorded-notice">
+                {notice}
+              </p>
+            )}
+            {saveError && (
+              <p role="alert" className="recorded-notice">
+                {saveError}
+              </p>
+            )}
           </div>
-          <div className="studio-refinement">
-            <div className="studio-section-heading">
+          {sceneDrafts.length > 0 && (
+            <div className="recorded-drafts">
               <h4>
-                {dirty
-                  ? "This edit feeds back into"
-                  : receipt.length
-                    ? "Last example refinement"
-                    : "The feedback loop"}
+                {sceneDrafts.length} draft{" "}
+                {sceneDrafts.length === 1 ? "edit" : "edits"} for this moment
               </h4>
-              <span className="studio-subtle">Illustrated</span>
+              {sceneDrafts.map((edit) => (
+                <div key={edit.id}>
+                  <span>
+                    {edit.target === "content"
+                      ? "Wording"
+                      : edit.target === "visuals"
+                        ? "Visuals"
+                        : "Pacing"}{" "}
+                    · {clockLabel(edit.timestamp)}
+                  </span>
+                  <p>{edit.message}</p>
+                  <button
+                    onClick={() => removeDraft(edit.id)}
+                    aria-label={`Remove draft: ${edit.message}`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
-            {path.length ? (
-              <ol>
-                {path.map((step) => (
-                  <li key={step.id}>
-                    <span
-                      className={
-                        step.action === "refine" ? "is-refinement" : ""
-                      }
-                    >
-                      {step.action === "refine" ? "↶" : "→"}
-                    </span>
-                    <strong>{step.name}</strong>
-                    <small>
-                      {step.action === "refine"
-                        ? "Refine prompt"
-                        : step.id === "review"
-                          ? "Check again"
-                          : "Revisit output"}
-                    </small>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p>
-                Change a message or visual style. The prompt steps above will
-                show where that feedback belongs.
-              </p>
-            )}
-            {!!displayedChanges.length && (
-              <p>
-                {displayedChanges.length} clip{" "}
-                {displayedChanges.length === 1 ? "edit" : "edits"} ·{" "}
-                {new Set(displayedChanges.map((change) => change.prompt)).size}{" "}
-                prompt{" "}
-                {new Set(displayedChanges.map((change) => change.prompt))
-                  .size === 1
-                  ? "step"
-                  : "steps"}{" "}
-                to refine
-              </p>
-            )}
-          </div>
+          )}
         </aside>
       </div>
-      {receipt.length > 0 && !dirty && (
-        <div className="studio-receipt" role="status">
-          <strong>Example v{revision} saved in this prototype.</strong>
-          <span>
-            The highlighted steps show how these edits would refine the script.
-          </span>
-          <ul>
-            {receipt.map((change) => (
-              <li key={change.field}>
-                <span>{FIELD_LABELS[change.field]}</span>
-                <del>{change.before}</del>
-                <span aria-hidden="true">→</span>
-                <b>{change.after}</b>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <footer className={`studio-savebar ${dirty ? "is-dirty" : ""}`}>
-        <div>
-          <strong>
-            {invalid
-              ? "Add text to the empty fields before saving."
-              : dirty
-                ? `${changes.length} unsaved clip ${changes.length === 1 ? "edit" : "edits"}`
-                : "Try editing the clip to see the feedback loop"}
-          </strong>
-          <span>
-            Local walkthrough. Reloading or switching agents resets the example.
-          </span>
-        </div>
-        <div className="workflow-save-actions">
-          <button
-            className="workflow-button is-quiet"
-            disabled={!dirty}
-            title={
-              !dirty ? "There are no unsaved edits to discard." : undefined
-            }
-            onClick={() => {
-              setClip({ ...saved });
-              setBefore(false);
-            }}
-          >
-            Discard edits
-          </button>
-          <button
-            className="workflow-button is-primary"
-            disabled={!dirty || invalid}
-            title={
-              invalid
-                ? "Add text to the empty fields first."
-                : !dirty
-                  ? "Edit a message or visual style first."
-                  : "Save this local example and illustrate the prompt feedback."
-            }
-            onClick={save}
-          >
-            Save changes <span aria-hidden="true">↗</span>
-          </button>
-        </div>
-      </footer>
-    </section>
+    </>
+  );
+}
+
+function EditorSkeleton() {
+  return (
+    <div
+      className="recorded-skeleton"
+      role="status"
+      aria-label="Loading recorded demo"
+    >
+      <div />
+      <div />
+      <span>Loading the demo and its recorded story…</span>
+    </div>
   );
 }
