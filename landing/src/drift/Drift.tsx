@@ -2,15 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import AppShell from "../dashboard/AppShell";
 import { LoggedOutView, ToastProvider } from "../dashboard/DashboardCommon";
 import { AdminPanelControls, ImpersonationBanner } from "../GodMode";
-import {
-  fetchAgentRuns,
-  fetchOverview,
-  fetchPlans,
-  type DriftOverview,
-  type WorkflowPlan as Plan,
-} from "./api";
+import { fetchAgentRuns, fetchOverview, type DriftOverview } from "./api";
 import type { DriftRun } from "./model";
-import WorkflowPlan from "./WorkflowPlan";
+import ScriptStudio from "./ScriptStudio";
 import RunExplorer from "./RunExplorer";
 import "./drift.css";
 
@@ -67,7 +61,6 @@ function DriftView({ user }: { user: User }) {
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [pendingAgent, setPendingAgent] = useState<string | null>(null);
   const handleDirty = useCallback((value: boolean) => {
     setDirty(value);
@@ -100,7 +93,7 @@ function DriftView({ user }: { user: User }) {
     return () => controller.abort();
   }, [refresh]);
   function switchAgent(id: string) {
-    if (id === agentId || busy) return;
+    if (id === agentId) return;
     if (dirty) {
       setPendingAgent(id);
       return;
@@ -136,18 +129,17 @@ function DriftView({ user }: { user: User }) {
         <div className="drift-workspace">
           <header className="drift-heading">
             <div>
-              <h1>Demo workflows</h1>
-              <p>Follow each step and guide what your demos will generate.</p>
+              <h1>Drift script</h1>
+              <p>
+                See how prompts become a demo. Refine the script by editing its
+                output.
+              </p>
             </div>
             {overview && (
               <label className="workflow-agent-picker">
                 Agent
                 <select
                   aria-label="Agent"
-                  disabled={busy}
-                  title={
-                    busy ? "Wait for the workflow save to finish." : undefined
-                  }
                   value={agentId ?? ""}
                   onChange={(event) => switchAgent(event.target.value)}
                 >
@@ -163,8 +155,8 @@ function DriftView({ user }: { user: User }) {
           {pendingAgent && (
             <div className="workflow-notice" role="alert">
               <p>
-                You have unsaved changes. Save them before switching, or discard
-                this draft.
+                Switching agents resets this local example, including your
+                unsaved clip edits.
               </p>
               <div className="workflow-save-actions">
                 <button
@@ -202,7 +194,6 @@ function DriftView({ user }: { user: User }) {
               agentId={agentId}
               overview={overview}
               onDirty={handleDirty}
-              onBusy={setBusy}
             />
           ) : (
             <div className="workflow-empty">
@@ -220,39 +211,16 @@ function AgentWorkspace({
   agentId,
   overview,
   onDirty,
-  onBusy,
 }: {
   agentId: string;
   overview: DriftOverview;
   onDirty: (dirty: boolean) => void;
-  onBusy: (busy: boolean) => void;
 }) {
-  const [plans, setPlans] = useState<Plan[] | null>(null);
   const [runs, setRuns] = useState<DriftRun[] | null>(null);
-  const [planError, setPlanError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [view, setView] = useState("plan");
   const [refresh, setRefresh] = useState(0);
   const [limit, setLimit] = useState(25);
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchPlans(agentId, controller.signal)
-      .then((data) => {
-        if (!controller.signal.aborted) {
-          setPlans(data.plans);
-          setPlanError(null);
-        }
-      })
-      .catch((reason) => {
-        if (!controller.signal.aborted)
-          setPlanError(
-            reason instanceof Error
-              ? reason.message
-              : "The workflow plan could not load.",
-          );
-      });
-    return () => controller.abort();
-  }, [agentId, refresh]);
   useEffect(() => {
     const controller = new AbortController();
     const load = () =>
@@ -312,7 +280,7 @@ function AgentWorkspace({
           aria-controls="workflow-plan-panel"
           onClick={() => setView("plan")}
         >
-          Workflow plan
+          Visualize script
         </button>
         <button
           id="runs-tab"
@@ -331,34 +299,14 @@ function AgentWorkspace({
         aria-labelledby="plan-tab"
         hidden={view !== "plan"}
       >
-        {planError ? (
-          <div className="workflow-empty" role="alert">
-            <p>{planError}</p>
-            <button
-              className="workflow-button"
-              onClick={() => setRefresh((value) => value + 1)}
-            >
-              Try again
-            </button>
-          </div>
-        ) : plans === null ? (
-          <WorkflowSkeleton />
-        ) : plans.length ? (
-          plans.map((plan) => (
-            <WorkflowPlan
-              key={`${agentId}:${plan.task}`}
-              agentId={agentId}
-              plan={plan}
-              onDirty={onDirty}
-              onBusy={onBusy}
-            />
-          ))
+        {agentId === "photon" ? (
+          <ScriptStudio onDirty={onDirty} active={view === "plan"} />
         ) : (
           <div className="workflow-empty">
-            <h2>No editable plan yet</h2>
+            <h2>The visual prototype starts with Photon</h2>
             <p>
-              The first editing surface is available for Photon demos. You can
-              still follow this agent’s runs step by step.
+              Choose Photon above to explore the prompt sequence and edit a
+              sample clip.
             </p>
             <button className="workflow-button" onClick={() => setView("runs")}>
               View run history

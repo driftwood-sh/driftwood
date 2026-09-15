@@ -98,29 +98,39 @@ Chromium and iPhone WebKit. `DEMO_TEST_SCREENSHOTS` optionally captures the
 feedback states; `DEMO_TEST_WEBKIT_PATH` selects an installed WebKit executable.
 Mock feedback never sends a Slack message.
 
-## Admin demo workflows
+## Admin Drift script visualization
 
-`/dashboard/admin/drift` is the platform-admin-only workflow editor. Photon’s
-plan shows six ordered steps and the output of each one, with creative
-direction controls for research, story, artwork and presentation. The story
-outline describes the planned structure; it is not a generated demo preview.
-The script and base prompts stay on the server. Saves apply to future runs
-in the selected agent’s workspace and do not generate a demo immediately.
+`/dashboard/admin/drift` is platform-admin-only. Photon’s **interactive
+prototype** shows the prompt sequence as five stages (research, story, artwork,
+build, review) and its output as five scenes on a 30-second storyboard. These
+are different views: prompt stages create and review the whole demo; scenes
+are sections of that demo. The fictional Sample Travel frames and timings
+illustrate the interaction, rather than representing a generated run.
 
-Run history uses the same ordered layout with review results and corrections.
-Unrecorded steps stay explicitly unrecorded. Other agents keep their existing
-process maps; the first editable plan is Photon only.
+Click a scene, then a message or card, to edit the visible output. Content
+edits illustrate feedback into Story, palette/background into Artwork, and
+message sizing into Build. The linked stages highlight which prompts would
+be refined and which later outputs would be revisited. The Checks tab lists
+review criteria, explicitly marked as not run. Before/After and storyboard
+playback let an admin inspect the example across scenes.
 
-Drafts survive tab changes and failed saves. Switching agents asks before
-discarding edits. Version conflicts offer an explicit discard-and-reload path;
-the editor never silently overwrites another admin’s changes.
+**Save changes only saves a local example revision.** No prompts are exposed
+or written, and no generation, API mutation, or Slack message occurs. The MCP
+integration is future work; `studio-model.ts` isolates the sample clip changes
+and illustrative feedback mapping, without defining a backend API contract.
+Reloading or switching agents resets the example. Drafts survive view-tab
+changes; switching agents asks before discarding unsaved edits.
+
+Run history remains a separate read-only view of recorded steps, review
+results, and corrections. Unrecorded steps stay explicitly unrecorded. Other
+agents keep their process maps; the visual editing prototype is Photon only.
 
 Preview `/dashboard/admin/drift?mock=admin`. Run `npm run test:drift` against
-a built preview on port 5182 (`DRIFT_TEST_BASE_URL` overrides it). The script
-checks Chromium and iPhone WebKit, saves, conflicts, drafts, access, keyboard
-navigation and accessibility. `DRIFT_TEST_SCREENSHOTS` captures evidence;
-`DRIFT_TEST_WEBKIT_EXECUTABLE` selects an installed WebKit binary. Mock saves
-stay in memory and never call the backend or Slack.
+a built preview on port 5182 (`DRIFT_TEST_BASE_URL` overrides it). Tests cover
+Chromium and iPhone WebKit: output edits, feedback mapping, local revisions,
+comparison, playback, absence of writes, agent scope, history, keyboard and
+accessibility. `DRIFT_TEST_SCREENSHOTS` captures evidence;
+`DRIFT_TEST_WEBKIT_EXECUTABLE` selects an installed WebKit binary.
 
 ## Quality gate
 

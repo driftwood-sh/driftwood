@@ -21,7 +21,7 @@ test("admin navigation contains only the current internal workstreams", () => {
       { label: "Review queue", href: "/dashboard/review" },
       { label: "Fleet", href: "/dashboard/admin/fleet" },
       { label: "Agents", href: "/dashboard/admin/agents" },
-      { label: "Demo workflows", href: "/dashboard/admin/drift" },
+      { label: "Drift script", href: "/dashboard/admin/drift" },
       { label: "Search visibility", href: "/dashboard/admin/search-visibility" },
     ],
   );

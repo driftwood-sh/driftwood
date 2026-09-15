@@ -3,9 +3,7 @@
   margin: 0 auto;
   color: #16181b;
 }
-.drift-workspace button,
-.drift-workspace select,
-.drift-workspace textarea {
+:where(.drift-workspace) :where(button, select, textarea) {
   font: inherit;
 }
 .drift-workspace [hidden] {

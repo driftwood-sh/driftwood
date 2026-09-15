@@ -10,263 +10,204 @@ const axe = await readFile(
 );
 if (screenshots) await mkdir(screenshots, { recursive: true });
 
-async function checkEditor(page, name) {
+async function checkStudio(page, name) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${base}/dashboard/admin/drift?mock=admin`);
-  await page.getByRole("heading", { name: "Photon messaging demo" }).waitFor();
-  const plan = page.getByRole("region", { name: "Workflow plan" });
-  assert.equal(await plan.locator(".workflow-step").count(), 6);
+  await page
+    .getByRole("heading", { name: "Photon’s prompt sequence" })
+    .waitFor();
+  const studio = page.getByRole("region", {
+    name: "Photon script visualization",
+  });
+  const frame = studio.locator(".studio-preview-canvas");
+  const prompts = studio.locator(".studio-prompt-list");
+  const save = studio.getByRole("button", {
+    name: "Save changes",
+    exact: false,
+  });
+  const opening = page.getByLabel("Opening message", { exact: true });
+  const scene = (name) =>
+    studio.getByRole("button", { name: new RegExp(`^${name}, 0:`) });
+  const tab = (name) => studio.getByRole("tab", { name, exact: true });
+  await page.evaluate(() => {
+    const original = window.fetch;
+    window.studioWrites = [];
+    window.fetch = (input, init) => {
+      const method =
+        init?.method ?? (input instanceof Request ? input.method : "GET");
+      const url = new URL(
+        input instanceof Request ? input.url : String(input),
+        location.href,
+      );
+      if (
+        url.origin === location.origin &&
+        !["GET", "HEAD"].includes(method.toUpperCase())
+      )
+        window.studioWrites.push({ url: String(input), method });
+      return original(input, init);
+    };
+  });
+  assert.equal(await prompts.locator("button").count(), 5);
+  assert.equal(await studio.locator(".studio-filmstrip button").count(), 5);
+  assert.equal(await save.isDisabled(), true);
   assert.equal(
-    await page
-      .getByRole("button", { name: "Save changes", exact: true })
+    await studio
+      .getByRole("button", { name: "Before", exact: true })
       .isDisabled(),
     true,
   );
-  await page.evaluate(() => {
-    const original = window.fetch;
-    window.workflowRequests = [];
-    window.holdWorkflowSave = false;
-    window.failWorkflowSave = false;
-    window.conflictWorkflowSave = false;
-    window.fetch = async (url, init) => {
-      if (String(url).includes("/plans/") && init?.method === "PUT") {
-        window.workflowRequests.push(JSON.parse(init.body));
-        if (window.holdWorkflowSave)
-          await new Promise((resolve) => {
-            window.releaseWorkflowSave = resolve;
-          });
-        if (window.failWorkflowSave)
-          return Response.json(
-            {
-              error: {
-                code: "unavailable",
-                detail: "Save unavailable. Your draft is still here.",
-              },
-            },
-            { status: 503 },
-          );
-        if (window.conflictWorkflowSave) {
-          window.conflictWorkflowSave = false;
-          await original(url, {
-            ...init,
-            body: JSON.stringify({
-              version: JSON.parse(init.body).version,
-              changes: { "story.direction": "Another admin’s direction" },
-            }),
-          });
-          return Response.json(
-            {
-              error: {
-                code: "workflow_changed",
-                detail:
-                  "This workflow changed. Reload it before saving your changes.",
-              },
-            },
-            { status: 409 },
-          );
-        }
-      }
-      return original(url, init);
-    };
-  });
+  assert.equal(
+    await studio.getByText("Interactive prototype", { exact: true }).count(),
+    1,
+  );
 
-  const storyStep = page.getByRole("button", {
-    name: /03 Plan the conversation/,
-  });
-  const artworkStep = page.getByRole("button", {
-    name: /04 Create the artwork/,
-  });
-  const save = page.getByRole("button", { name: "Save changes", exact: true });
-  await storyStep.click();
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill("Show a customer booking a weekend getaway.");
-  await artworkStep.click();
-  await page
-    .getByLabel("Backdrop", { exact: true })
-    .fill("Soft blue with natural light.");
+  // Output selection, text feedback and the same draft across view changes.
+  await frame
+    .getByRole("button", { name: "Edit opening message", exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.getElementById("clip-field-request") === document.activeElement,
+  );
+  await studio
+    .getByRole("button", { name: "Shorten the message", exact: true })
+    .click();
+  assert.equal(await opening.inputValue(), "Plan me a sunny weekend.");
+  assert.match(
+    await frame
+      .getByRole("button", { name: "Edit opening message" })
+      .innerText(),
+    /Plan me a sunny weekend\./,
+  );
+  assert.deepEqual(
+    await prompts.locator(".is-affected strong").allTextContents(),
+    ["Story", "Artwork", "Build", "Review"],
+  );
+  assert.equal(
+    await prompts.getByText("Would refine", { exact: true }).count(),
+    1,
+  );
   await page.getByRole("tab", { name: "Run history", exact: true }).click();
   await page
     .getByRole("heading", { name: "Sample company", exact: true })
     .waitFor();
   await page.getByRole("button", { name: /03 Plan the conversation/ }).click();
   await page.getByText("Review passed · Attempt 2", { exact: true }).waitFor();
-  assert.equal(
-    await page.getByText("Passed after correction", { exact: true }).count(),
-    1,
-  );
-  await page.getByRole("tab", { name: "Workflow plan", exact: true }).click();
-  await storyStep.click();
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "Show a customer booking a weekend getaway.",
-  );
+  await page
+    .getByRole("tab", { name: "Visualize script", exact: true })
+    .click();
+  assert.equal(await opening.inputValue(), "Plan me a sunny weekend.");
   await page.getByLabel("Agent", { exact: true }).selectOption("autosana");
-  await page.getByRole("button", { name: "Keep editing" }).click();
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
   assert.equal(
     await page.getByLabel("Agent", { exact: true }).inputValue(),
     "photon",
   );
 
-  await page.getByLabel("Agent", { exact: true }).selectOption("autosana");
-  await page.getByRole("button", { name: "Discard and switch" }).waitFor();
-  await page.evaluate(() => {
-    window.holdWorkflowSave = true;
-  });
-  await save.evaluate((button) => {
-    button.click();
-    button.click();
-  });
-  await page.getByRole("button", { name: "Saving…", exact: true }).waitFor();
-  await page.waitForFunction(
-    () => typeof window.releaseWorkflowSave === "function",
-  );
-  assert.equal(
-    await page.getByLabel("Agent", { exact: true }).isDisabled(),
-    true,
-  );
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).isDisabled(),
-    true,
-  );
-  assert.equal(await page.evaluate(() => window.workflowRequests.length), 1);
-  await page.evaluate(() => {
-    window.holdWorkflowSave = false;
-    window.releaseWorkflowSave();
-  });
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Changes saved for future demos." })
-    .waitFor();
-  const request = await page.evaluate(() => window.workflowRequests[0]);
-  assert.equal(
-    await page.getByRole("button", { name: "Discard and switch" }).count(),
-    0,
-  );
-  assert.deepEqual(Object.keys(request).sort(), ["changes", "version"]);
-  assert.match(request.version, /^[a-f0-9]{64}$/);
-  assert.deepEqual(request.changes, {
-    "story.direction": "Show a customer booking a weekend getaway.",
-    "artwork.backdrop": "Soft blue with natural light.",
-  });
-
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill("Keep this through a failed save.");
-  await page.evaluate(() => {
-    window.failWorkflowSave = true;
-  });
-  await save.click();
-  await page
-    .getByRole("alert")
-    .filter({ hasText: "Save unavailable." })
-    .waitFor();
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "Keep this through a failed save.",
-  );
-  await page.evaluate(() => {
-    window.failWorkflowSave = false;
-  });
-  await save.click();
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Changes saved for future demos." })
-    .waitFor();
-  assert.notEqual(
-    (await page.evaluate(() => window.workflowRequests.at(-1))).version,
-    request.version,
-  );
-
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill("A stale draft");
-  await page.evaluate(() => {
-    window.conflictWorkflowSave = true;
-  });
-  await save.click();
-  await page.getByRole("button", { name: "Reload latest plan" }).click();
-  await page.getByRole("button", { name: "Keep draft", exact: true }).click();
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "A stale draft",
-  );
-  await page.getByRole("button", { name: "Reload latest plan" }).click();
-  await page.getByRole("button", { name: "Discard draft and reload" }).click();
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Latest workflow loaded." })
-    .waitFor();
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "Another admin’s direction",
-  );
+  // Invalid content stays local and cannot be saved; discard returns to the baseline.
+  await opening.fill("   ");
   assert.equal(await save.isDisabled(), true);
-
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill("A temporary draft");
-  await page
-    .getByRole("button", { name: "Discard changes", exact: true })
+  await studio
+    .getByRole("button", { name: "Discard edits", exact: true })
     .click();
   assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "Another admin’s direction",
+    await opening.inputValue(),
+    "Find me a sunny escape for this weekend.",
   );
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill("Discard on switch");
-  await page.getByLabel("Agent", { exact: true }).selectOption("autosana");
-  await page.getByRole("button", { name: "Discard and switch" }).click();
-  await page.getByRole("heading", { name: "No editable plan yet" }).waitFor();
-  assert.equal(new URL(page.url()).searchParams.get("agent"), "autosana");
-  await page.getByRole("button", { name: "View run history" }).click();
-  await page
-    .getByRole("heading", { name: "Agility Robotics", exact: true })
-    .waitFor();
-  await page.getByRole("button", { name: /Zoox quarantined/ }).click();
-  await page
-    .getByRole("heading", { name: "Still generation", exact: true })
-    .waitFor();
+  assert.equal(await prompts.locator(".is-affected").count(), 0);
+
+  // Independent style edits map to Artwork and Build, without rerunning Research or Story.
+  await tab("Look").click();
+  await studio.getByRole("button", { name: "Sunset", exact: true }).click();
+  assert.equal(await frame.locator(".palette-sunset").count(), 1);
+  assert.deepEqual(
+    await prompts.locator(".is-affected strong").allTextContents(),
+    ["Artwork", "Build", "Review"],
+  );
+  await studio
+    .getByRole("button", { name: "Larger text", exact: true })
+    .click();
+  await studio.getByRole("button", { name: "Calmer", exact: true }).click();
+  assert.equal(await frame.locator(".text-large.background-soft").count(), 1);
   assert.equal(
-    await page.getByText("Needs attention", { exact: true }).count(),
+    await prompts.getByText("Would refine", { exact: true }).count(),
+    2,
+  );
+
+  // A shared clip detail carries through the rest of the storyline.
+  await scene("The choice").click();
+  await studio
+    .getByRole("button", { name: "Try Porto instead", exact: true })
+    .click();
+  assert.equal(await frame.getByText("Porto", { exact: true }).count(), 1);
+  await scene("The result").click();
+  assert.match(await frame.innerText(), /A weekend in Porto, just for you/);
+  await scene("The next step").click();
+  assert.match(await frame.innerText(), /A weekend in Porto/);
+  await save.click();
+  await studio
+    .getByRole("status")
+    .filter({ hasText: "Example v2 saved in this prototype." })
+    .waitFor();
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(await studio.locator(".studio-receipt li").count(), 4);
+  await studio.getByRole("button", { name: "Before", exact: true }).click();
+  assert.match(await frame.innerText(), /A weekend in Lisbon/);
+  assert.equal(
+    await frame
+      .locator(".palette-ocean.text-standard.background-vivid")
+      .count(),
     1,
   );
-  if (screenshots)
-    await page.screenshot({
-      path: `${screenshots}/runs-${name}.png`,
-      fullPage: true,
-    });
+  await studio.getByRole("button", { name: "After", exact: true }).click();
+  assert.match(await frame.innerText(), /A weekend in Porto/);
 
-  await page.getByLabel("Agent", { exact: true }).selectOption("photon");
-  await page.getByRole("heading", { name: "Photon messaging demo" }).waitFor();
-  await storyStep.click();
-  assert.equal(
-    await page.getByLabel("Story direction", { exact: true }).inputValue(),
-    "Another admin’s direction",
-  );
-  const planTab = page.getByRole("tab", { name: "Workflow plan", exact: true });
-  await planTab.focus();
+  // Checklists remain honest, and both tabsets support keyboard navigation.
+  await tab("Content").focus();
   await page.keyboard.press("ArrowRight");
-  assert.equal(
-    await page
-      .getByRole("tab", { name: "Run history", exact: true })
-      .getAttribute("aria-selected"),
-    "true",
-  );
-  await page.keyboard.press("Home");
-  assert.equal(await planTab.getAttribute("aria-selected"), "true");
-  await page
-    .getByLabel("Story direction", { exact: true })
-    .fill(
-      "Show a customer booking a weekend getaway. Keep the choices clear and the tone warm.",
-    );
-  await save.click();
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Changes saved for future demos." })
+  assert.equal(await tab("Look").getAttribute("aria-selected"), "true");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await studio.getByText("Not run", { exact: true }).count(), 5);
+  await page.keyboard.press("End");
+  assert.equal(await tab("Step details").getAttribute("aria-selected"), "true");
+  await prompts.getByRole("button", { name: /Research/ }).click();
+  await studio.getByText("Example brief", { exact: true }).waitFor();
+  assert.equal(await studio.locator("textarea:visible").count(), 0);
+
+  // The playhead navigates the same storyboard, completes, then restarts cleanly.
+  const playhead = studio.getByRole("slider", { name: "Storyboard playhead" });
+  await playhead.fill("12");
+  await studio
+    .getByRole("heading", { name: "The choice", exact: true })
     .waitFor();
+  await playhead.fill("29.75");
+  await studio
+    .getByRole("button", { name: "Play storyboard", exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[aria-label="Storyboard playhead"]').value ===
+      "30",
+  );
+  await studio
+    .getByRole("button", { name: "Play storyboard", exact: true })
+    .click();
+  await page.waitForFunction(() => {
+    const value = Number(
+      document.querySelector('[aria-label="Storyboard playhead"]').value,
+    );
+    return value > 0 && value < 4;
+  });
+  await studio
+    .getByRole("button", { name: "Pause storyboard", exact: true })
+    .click();
+  const paused = await playhead.inputValue();
+  await page.waitForTimeout(350);
+  assert.equal(await playhead.inputValue(), paused);
+
+  await scene("The result").click();
+  await tab("Look").click();
   await page.evaluate(axe);
   const violations = await page.evaluate(async () =>
     (
@@ -275,30 +216,91 @@ async function checkEditor(page, name) {
       })
     ).violations.map((item) => ({
       id: item.id,
-      nodes: item.nodes.map((node) => node.target),
+      nodes: item.nodes.map((node) => ({
+        target: node.target,
+        summary: node.failureSummary,
+      })),
     })),
   );
   assert.deepEqual(violations, [], `${name} accessibility`);
   assert.equal(
     await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
     ),
     true,
     `${name} horizontal overflow`,
   );
   if (screenshots) {
+    await page.evaluate(() => {
+      document.activeElement?.blur();
+      window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(100);
     await page.screenshot({
-      path: `${screenshots}/plan-${name}.png`,
+      path: `${screenshots}/studio-${name}.png`,
       fullPage: true,
     });
-    if (page.viewportSize().width < 820)
-      await plan
-        .locator(".workflow-inspector")
-        .screenshot({ path: `${screenshots}/details-${name}.png` });
+    await studio
+      .locator(".studio-workbench")
+      .screenshot({ path: `${screenshots}/workbench-${name}.png` });
+    await frame.evaluate((element) =>
+      element.scrollIntoView({ block: "start" }),
+    );
+    await page.screenshot({
+      path: `${screenshots}/preview-viewport-${name}.png`,
+    });
   }
+
+  // Reset and agent switching discard only the local example. Run history stays available.
+  await studio
+    .getByRole("button", { name: "Reset example", exact: true })
+    .click();
+  assert.equal(
+    await opening.inputValue(),
+    "Find me a sunny escape for this weekend.",
+  );
+  assert.equal(await studio.locator(".studio-receipt").count(), 0);
+  await opening.fill("An unsaved local edit");
+  await page.getByLabel("Agent", { exact: true }).selectOption("autosana");
+  await page
+    .getByRole("button", { name: "Discard and switch", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "The visual prototype starts with Photon" })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "View run history", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "Agility Robotics", exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: /Zoox quarantined/ }).click();
+  await page
+    .getByRole("heading", { name: "Still generation", exact: true })
+    .waitFor();
+  await page.getByLabel("Agent", { exact: true }).selectOption("photon");
+  assert.equal(
+    await opening.inputValue(),
+    "Find me a sunny escape for this weekend.",
+  );
+  await studio
+    .getByRole("button", { name: "Shorten the message", exact: true })
+    .click();
+  await save.click();
+  assert.deepEqual(
+    await page.evaluate(() => window.studioWrites),
+    [],
+    `${name}: prototype must never write to an application API`,
+  );
+  await page.reload();
+  await opening.waitFor();
+  assert.equal(
+    await opening.inputValue(),
+    "Find me a sunny escape for this weekend.",
+  );
   assert.deepEqual(errors, [], `${name} browser errors`);
   console.log(
-    `${name}: edit, save, draft recovery, conflict, agent scope, history, keyboard, accessibility passed`,
+    `${name}: output edits, prompt feedback, comparison, local revisions, playback, no API writes, history, access controls, keyboard and accessibility passed`,
   );
 }
 
@@ -307,13 +309,13 @@ try {
   const context = await desktop.newContext({
     viewport: { width: 1440, height: 1000 },
   });
-  await checkEditor(await context.newPage(), "desktop");
+  await checkStudio(await context.newPage(), "desktop");
   const denied = await context.newPage();
   await denied.goto(`${base}/dashboard/admin/drift?mock=member`);
   await denied.getByRole("link", { name: /Google/ }).waitFor();
   assert.equal(
     await denied
-      .getByRole("heading", { name: "Photon messaging demo" })
+      .getByRole("heading", { name: "Photon’s prompt sequence" })
       .count(),
     0,
   );
@@ -328,7 +330,7 @@ const mobile = await webkit.launch(
 );
 try {
   const context = await mobile.newContext({ ...devices["iPhone 13"] });
-  await checkEditor(await context.newPage(), "iphone");
+  await checkStudio(await context.newPage(), "iphone");
 } finally {
   await mobile.close();
 }
