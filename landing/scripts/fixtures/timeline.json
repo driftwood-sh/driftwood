@@ -1,0 +1,48 @@
+{
+  "run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "company_name": "Example company",
+  "title": "A synthetic playback fixture",
+  "goal": "Verify scene selection without customer data",
+  "workflow_version": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "video_version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "duration": 30,
+  "width": 180,
+  "height": 356,
+  "video_url": "/api/v1/admin/html-demos/photon/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/video",
+  "scenes": [
+    {
+      "id": "request",
+      "label": "The request",
+      "direction": "Open with the customer's request.",
+      "start": 0,
+      "end": 4,
+      "preview_time": 3.9,
+      "content": [
+        {
+          "field": "first_request",
+          "label": "Customer request",
+          "text": "Help me choose a plan."
+        }
+      ],
+      "bindings": {
+        "content": ["first_request"],
+        "visuals": ["wallpaper"],
+        "timing": "timing_plan.request"
+      }
+    },
+    {
+      "id": "hold",
+      "label": "The finish",
+      "direction": "Hold the finished result.",
+      "start": 4,
+      "end": 30,
+      "preview_time": 29.9,
+      "content": [],
+      "bindings": {
+        "content": [],
+        "visuals": ["wallpaper"],
+        "timing": "timing_plan.hold"
+      }
+    }
+  ]
+}
