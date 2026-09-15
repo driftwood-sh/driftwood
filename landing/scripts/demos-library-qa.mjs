@@ -2,11 +2,12 @@
    pending and nothing scheduled opened /dashboard/demos on three empty
    segments and read it as lost work.
 
-   Run the dev server on 5191 first: npm run dev -- --port 5191 */
+   Run the dev server on 5191 first: npm run dev:qa
+   Another port: DEMO_QA_BASE_URL=http://127.0.0.1:5193 node scripts/demos-library-qa.mjs */
 import { chromium, webkit, devices } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
-const base='http://127.0.0.1:5191';
+const base=process.env.DEMO_QA_BASE_URL ?? 'http://127.0.0.1:5191';
 const shots='/private/tmp/driftwood-dashboard-review-shots';
 mkdirSync(shots,{recursive:true});
 const browser=await chromium.launch({headless:true});
@@ -55,8 +56,12 @@ try {
  // Newest first, whatever made the demo.
  assert.equal(await page.locator('.dp-card').first().getAttribute('aria-label'),'Airbnb');
  assert.equal(await page.locator('.dp-card').last().getAttribute('aria-label'),'Demo run 100');
- // Nothing to approve, skip or pin: those writes name a review item.
- for (const label of ['Approve','Skip','Pin','Approve all']) {
+ // Approve names the demo itself, so every card carries one and Approve all
+ // covers the segment. Skip and Pin name a review item, which a demo with no
+ // email does not have.
+ assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),111);
+ assert.equal(await page.getByRole('button',{name:'Approve all',exact:true}).count(),1);
+ for (const label of ['Skip','Pin']) {
   assert.equal(await page.getByRole('button',{name:label,exact:true}).count(),0,`${label} must not render`);
  }
  assert.equal(await page.getByRole('button',{name:'Ask for a change',exact:true}).count(),111);
@@ -87,10 +92,11 @@ try {
  assert.equal(await northstar.count(),1);
  assert.equal(await northstar.locator('.dp-col-email').count(),1);
  assert.equal(await northstar.getByRole('button',{name:'Approve',exact:true}).count(),1);
- // The same page still carries the demos that have no email yet.
+ // The same page still carries the demos that have no email yet, and those
+ // are approved too: one press says "send this to the right people there".
  const sample=page.locator('.dp-card[aria-label*="Sample company"]');
  assert.equal(await sample.count(),1);
- assert.equal(await sample.getByRole('button',{name:'Approve',exact:true}).count(),0);
+ assert.equal(await sample.getByRole('button',{name:'Approve',exact:true}).count(),1);
  assert.equal(await sample.getByRole('button',{name:'Ask for a change',exact:true}).count(),1);
  // And a change on one of those sends.
  await sample.getByRole('button',{name:'Ask for a change',exact:true}).click();
@@ -99,6 +105,30 @@ try {
  await page.getByText('Change sent.',{exact:true}).waitFor();
  await page.screenshot({path:`${shots}/demos-staging-both-sources.png`,fullPage:true});
 
+ // One card per company. This library holds 71 rows for 60 companies: 60
+ // arrive from the private-run source as "<company> (<domain>)", and 11 of
+ // those companies arrive again as a lead-linked video under the bare company
+ // name. A customer counts companies, so the page owes 60 cards and a count
+ // that says 60.
+ await page.goto(`${base}/dashboard/demos?mock=photon-shaped`);
+ await page.locator('.dp-card').first().waitFor();
+ const staging=page.locator('.dp-segments button[aria-pressed="true"]');
+ // The count renders only once both sources are whole, so it is also the
+ // signal that the second page of the library landed.
+ await staging.locator('.dp-count').waitFor();
+ const shown=await page.locator('.dp-card').evaluateAll((nodes)=>nodes.map((node)=>node.getAttribute('aria-label')));
+ const company=(label)=>label.toLowerCase().replace(/\s*\([^()]+\)$/,'').trim();
+ const companies=new Set(shown.map(company));
+ assert.equal(shown.length,60,'one card per company');
+ assert.equal(companies.size,60,`no company twice: ${[...companies].filter((name)=>shown.filter((label)=>company(label)===name).length>1)}`);
+ assert.equal(await staging.locator('.dp-count').innerText(),'60','the count is what the segment lists');
+ // The copy kept is the newest one, whichever source registered it: Airbnb's
+ // lead-linked video is newer than its run, and Wanderu's run is newer than
+ // its lead-linked video.
+ assert.ok(shown.includes('Airbnb'),'Airbnb keeps its newer lead-linked video');
+ assert.ok(shown.includes('Wanderu (wanderu.com)'),'Wanderu keeps its newer run');
+ await page.screenshot({path:`${shots}/demos-staging-photon-shaped.png`});
+
  // A segment the reader picks still wins.
  await page.goto(`${base}/dashboard/demos?seg=sent&mock=library-only`);
  await page.locator('.dp-empty').waitFor();
@@ -106,7 +136,7 @@ try {
  assert.equal(await page.getByRole('link',{name:'All demo videos'}).count(),0);
 
  assert.deepEqual(errors,[]);
- console.log('Desktop Chromium: library demos in Staging, no dead controls, one card per demo, /library resolves, explicit segment wins.');
+ console.log('Desktop Chromium: library demos in Staging, Approve on every one of them, no dead controls, one card per demo, one card per company, /library resolves, explicit segment wins.');
 } finally {await browser.close();}
 
 const mobile=await webkit.launch({headless:true});

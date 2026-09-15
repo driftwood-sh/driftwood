@@ -2,9 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ACCOUNT_UNKNOWN,
+  approvableDemos,
+  approvalState,
+  approveKeyOf,
+  approvedLabel,
+  approvedNotScheduled,
+  awaitsPeople,
   channelLabel,
   decisionsFor,
   demoHeading,
+  isApprovable,
+  nobodyFoundLine,
+  readApprovalStatus,
   groupSentByDay,
   groupStagedDemos,
   isHeld,
@@ -24,10 +33,14 @@ import {
   laterSummary,
   splitQueueDays,
   stagedWithLibrary,
+  companyIdentity,
+  companyKeys,
+  latestPerCompany,
   timestampLabel,
   videoSeconds,
   sendingAccount,
   threadHref,
+  type ApprovalStatus,
   type LeadContext,
   type LibraryDemo,
   type ReviewItem,
@@ -506,7 +519,9 @@ test("both sources run newest first, because today's work is what a customer ope
     staged,
     [
       libraryRow({ demo_id: "newest", created_at: "2026-09-12T09:00:00Z" }),
-      libraryRow({ demo_id: "middle", created_at: "2026-09-10T09:00:00Z" }),
+      /* Another company: two demos of ONE company are one card, which the
+         tests below cover, so this pair has to be two companies to be two. */
+      libraryRow({ demo_id: "middle", company_name: "Omio", created_at: "2026-09-10T09:00:00Z" }),
     ],
     [],
   );
@@ -514,4 +529,375 @@ test("both sources run newest first, because today's work is what a customer ope
     demos.map((demo) => demo.key),
     ["library:newest", "library:middle", "lead:l1"],
   );
+});
+
+test("one company is one card, and the newest demo of it is the one kept", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "html:run",
+        company_name: "airbnb (airbnb.com)",
+        created_at: "2026-09-10T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "lead-row",
+        lead_id: "l9",
+        company_name: "Airbnb",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:lead-row"],
+  );
+});
+
+test("the company's newest demo wins whichever source registered it", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "html:run",
+        company_name: "wanderu (wanderu.com)",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "lead-row",
+        lead_id: "l9",
+        company_name: "Wanderu",
+        created_at: "2026-08-01T09:00:00Z",
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:html:run"],
+  );
+});
+
+test("a bare name reads as the company only when one domain claims it", () => {
+  /* Two Ollies on two sites are two companies, so the bare row joins
+     neither: merging namesakes would hide one of them. */
+  const rows = [
+    libraryRow({ demo_id: "us", company_name: "Ollie (ollie.ai)" }),
+    libraryRow({ demo_id: "uk", company_name: "Ollie (ollie.co.uk)" }),
+    libraryRow({ demo_id: "bare", company_name: "Ollie" }),
+  ];
+  assert.deepEqual(companyKeys(rows), [
+    "domain:ollie.ai",
+    "domain:ollie.co.uk",
+    "name:ollie",
+  ]);
+  assert.equal(latestPerCompany(rows).length, 3);
+});
+
+test("a trailing note that is not a domain stays part of the company name", () => {
+  assert.deepEqual(companyIdentity("Meta (WhatsApp)"), {
+    key: "meta (whatsapp)",
+    domain: null,
+  });
+  assert.deepEqual(companyIdentity("  Booking.com   (https://www.Booking.com/)  "), {
+    key: "booking.com",
+    domain: "booking.com",
+  });
+  assert.deepEqual(companyIdentity("Trip.com"), {
+    key: "trip.com",
+    domain: "trip.com",
+  });
+});
+
+test("a demo made for a named person keeps its own card", () => {
+  /* The endpoint keeps one demo per named lead on purpose. Two people at one
+     company are two demos, and collapsing them would hide one. */
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({ demo_id: "d-alex", lead_id: "l1", lead_name: "Alex", company_name: "Acme (acme.com)" }),
+      libraryRow({ demo_id: "d-sam", lead_id: "l2", lead_name: "Sam", company_name: "Acme" }),
+      libraryRow({ demo_id: "d-company", company_name: "Acme (acme.com)" }),
+    ],
+    [],
+  );
+  assert.deepEqual(demos.map((demo) => demo.key).sort(), [
+    "library:d-alex",
+    "library:d-company",
+    "library:d-sam",
+  ]);
+});
+
+test("a company whose newest demo is already queued still shows the one that is not", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "queued",
+        lead_id: "l1",
+        company_name: "Airbnb",
+        created_at: "2026-09-12T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "staged",
+        company_name: "airbnb (airbnb.com)",
+        created_at: "2026-09-10T09:00:00Z",
+      }),
+    ],
+    [send({ lead: lead("l1", "Dana Whitfield", "Airbnb") })],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key),
+    ["library:staged"],
+  );
+});
+
+/* ---------- approve, before anyone has been found ---------- */
+
+test("a demo with no approval field at all still offers Approve", () => {
+  /* The field is being added to the list response, so a client that ships
+     first reads nothing. Nothing must never read as "already approved". */
+  const row = libraryRow({});
+  assert.equal("approval" in row, false);
+  assert.equal(approvalState(row), "none");
+  assert.equal(awaitsPeople(row), false);
+  const demos = stagedWithLibrary([], [row], []);
+  assert.equal(demos.length, 1);
+  assert.equal(isApprovable(demos[0]), true);
+});
+
+test("an explicit null approval reads the same as an absent one", () => {
+  assert.equal(approvalState(libraryRow({ approval: null })), "none");
+  assert.equal(approvalState(null), "none");
+});
+
+test("the five statuses read as four states, because two pairs are one state", () => {
+  const state = (status: ApprovalStatus) =>
+    approvalState(libraryRow({ approval: { status, approved_at: "2026-09-12T09:00:00Z", note: null } }));
+  assert.equal(state("queued"), "waiting");
+  assert.equal(state("handed_to_agent"), "waiting");
+  assert.equal(state("no_contacts_found"), "nobody");
+  assert.equal(state("blocked"), "nobody");
+  assert.equal(state("contacts_found"), "filed");
+});
+
+test("a status this build has never heard of still means approved", () => {
+  assert.equal(readApprovalStatus("something_new"), "queued");
+  assert.equal(readApprovalStatus(undefined), "queued");
+  assert.equal(readApprovalStatus("handed_to_agent"), "handed_to_agent");
+});
+
+test("an approved demo leaves Staging, and one whose sends are filed does not", () => {
+  /* One company per row: one company is one card now, so rows that have to
+     stay separate cards have to be separate companies. */
+  const approved = (status: ApprovalStatus, id: string) =>
+    libraryRow({
+      demo_id: id,
+      company_name: id,
+      name: `photon-demo-${id}`,
+      approval: { status, approved_at: "2026-09-12T09:00:00Z", note: null },
+    });
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({ demo_id: "fresh", company_name: "fresh", name: "photon-demo-fresh" }),
+      approved("queued", "waiting"),
+      approved("handed_to_agent", "handed"),
+      approved("no_contacts_found", "nobody"),
+      approved("blocked", "blocked"),
+      approved("contacts_found", "filed"),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    demos.map((demo) => demo.key).sort(),
+    ["library:filed", "library:fresh"],
+  );
+});
+
+test("Approve all covers the demos with no email, and never one already approved", () => {
+  const demos = stagedWithLibrary(
+    groupStagedDemos([item({ id: "email-1" })]),
+    [
+      libraryRow({ demo_id: "a", company_name: "Omio", name: "photon-demo-a" }),
+      libraryRow({ demo_id: "b", company_name: "Klook", name: "photon-demo-b" }),
+      libraryRow({
+        demo_id: "done",
+        company_name: "Trainline",
+        name: "photon-demo-done",
+        approval: { status: "contacts_found", approved_at: "2026-09-12T09:00:00Z", note: null },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    approvableDemos(demos).map((demo) => approveKeyOf(demo)),
+    ["a", "b"],
+  );
+  /* The card with an email is a decision, not an approve: the two lists never
+     overlap, so a press over the whole segment counts each demo once. */
+  assert.equal(
+    demos.filter((demo) => demo.canDecide).every((demo) => !isApprovable(demo)),
+    true,
+  );
+  assert.equal(approveKeyOf(demos.find((demo) => demo.canDecide)!), null);
+});
+
+test("the demo key an approve names survives a colon in the id", () => {
+  const demos = stagedWithLibrary([], [libraryRow({ demo_id: "html:a1b2c3" })], []);
+  assert.equal(approveKeyOf(demos[0]), "html:a1b2c3");
+  assert.equal(encodeURIComponent(approveKeyOf(demos[0])!), "html%3Aa1b2c3");
+});
+
+/* ---------- approved, and nobody to send it to yet ---------- */
+
+test("the group holds the approved demos with no people, newest approval first", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({ demo_id: "fresh", company_name: "Omio", name: "photon-demo-fresh" }),
+    libraryRow({
+      demo_id: "older",
+      company_name: "Ledgerline",
+      approval: { status: "handed_to_agent", approved_at: "2026-09-10T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "newer",
+      company_name: "Meridian",
+      approval: { status: "queued", approved_at: "2026-09-12T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "filed",
+      company_name: "Northstar",
+      approval: { status: "contacts_found", approved_at: "2026-09-13T09:00:00Z", note: null },
+    }),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => [row.demoKey, row.company, row.approvedAt]),
+    [
+      ["newer", "Meridian", "2026-09-12T09:00:00Z"],
+      ["older", "Ledgerline", "2026-09-10T09:00:00Z"],
+    ],
+  );
+  /* Still people to come, so no row carries the line. */
+  assert.deepEqual(rows.map((row) => row.nobodyLine), [null, null]);
+});
+
+test("a demo nobody was found for carries one line, and the note writes it", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({
+      demo_id: "bloom",
+      company_name: "Bloom",
+      approval: { status: "no_contacts_found", approved_at: "2026-09-12T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "kestrel",
+      company_name: "Kestrel",
+      approval: { status: "blocked", approved_at: "2026-09-11T09:00:00Z", note: "Kestrel is on your blocklist." },
+    }),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => row.nobodyLine),
+    ["No one found at Bloom.", "Kestrel is on your blocklist."],
+  );
+});
+
+test("a note of blank space is not a line, so the company one stands", () => {
+  assert.equal(
+    nobodyFoundLine(
+      libraryRow({
+        company_name: "Bloom",
+        approval: { status: "no_contacts_found", approved_at: "2026-09-12T09:00:00Z", note: "   " },
+      }),
+    ),
+    "No one found at Bloom.",
+  );
+});
+
+test("a row with no approved_at falls back to the day the demo was made", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({ created_at: "2026-09-01T09:00:00Z", approval: { status: "queued", approved_at: "", note: null } }),
+  ]);
+  assert.equal(rows[0].approvedAt, "2026-09-01T09:00:00Z");
+});
+
+test("when they approved it: today, yesterday, then the date", () => {
+  const today = new Date(2026, 8, 13, 14, 0, 0);
+  const at = (y: number, m: number, d: number) => new Date(y, m, d, 9, 0, 0).toISOString();
+  assert.equal(approvedLabel(at(2026, 8, 13), today), "Today");
+  assert.equal(approvedLabel(at(2026, 8, 12), today), "Yesterday");
+  assert.equal(approvedLabel(at(2026, 8, 4), today), "Sep 4");
+  assert.equal(approvedLabel("not a date", today), "");
+});
+
+/* ---------- approval, against one card per company ---------- */
+
+test("approving a company's newest demo takes the company out of Staging", () => {
+  /* The reduction runs first and the approval test second, so an older demo
+     of the same company does not surface behind the one just approved. A card
+     asking to be approved again would read as an approval that did not take. */
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({
+        demo_id: "html:older",
+        company_name: "airbnb (airbnb.com)",
+        name: "airbnb-run",
+        created_at: "2026-09-10T09:00:00Z",
+      }),
+      libraryRow({
+        demo_id: "newer",
+        company_name: "Airbnb",
+        name: "airbnb-walkthrough",
+        created_at: "2026-09-12T09:00:00Z",
+        approval: { status: "queued", approved_at: "2026-09-12T10:00:00Z", note: null },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(demos, []);
+});
+
+test("one company registered twice is one row in the group, not two", () => {
+  const rows = approvedNotScheduled([
+    libraryRow({
+      demo_id: "html:run",
+      company_name: "airbnb (airbnb.com)",
+      created_at: "2026-09-10T09:00:00Z",
+      approval: { status: "queued", approved_at: "2026-09-11T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "lead-row",
+      company_name: "Airbnb",
+      created_at: "2026-09-12T09:00:00Z",
+      approval: { status: "no_contacts_found", approved_at: "2026-09-12T09:00:00Z", note: null },
+    }),
+    libraryRow({
+      demo_id: "other",
+      company_name: "Omio",
+      created_at: "2026-09-09T09:00:00Z",
+      approval: { status: "queued", approved_at: "2026-09-09T09:00:00Z", note: null },
+    }),
+  ]);
+  /* The newest demo of the company represents it, and it is the one whose
+     state the row shows. */
+  assert.deepEqual(
+    rows.map((row) => [row.demoKey, row.company, row.nobodyLine]),
+    [
+      ["lead-row", "Airbnb", "No one found at Airbnb."],
+      ["other", "Omio", null],
+    ],
+  );
+});
+
+test("Approve all names one demo per company, so no company is approved twice", () => {
+  const demos = stagedWithLibrary(
+    [],
+    [
+      libraryRow({ demo_id: "html:run", company_name: "airbnb (airbnb.com)", name: "airbnb-run", created_at: "2026-09-10T09:00:00Z" }),
+      libraryRow({ demo_id: "airbnb-lead", company_name: "Airbnb", name: "airbnb-lead", created_at: "2026-09-12T09:00:00Z" }),
+      libraryRow({ demo_id: "omio", company_name: "Omio", name: "omio-run", created_at: "2026-09-11T09:00:00Z" }),
+    ],
+    [],
+  );
+  assert.deepEqual(approvableDemos(demos).map(approveKeyOf), ["airbnb-lead", "omio"]);
 });

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:qa": "vite --host 127.0.0.1 --port 5191 --strictPort",
     "prebuild": "node scripts/fetch-asr.mjs",
     "build": "tsc -b && vite build && vite build --ssr src/prerender-entry.tsx --outDir dist-ssr && node scripts/prerender.mjs && rm -rf dist-ssr",
     "lint": "eslint .",
