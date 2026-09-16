@@ -139,20 +139,29 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
         `/api/v1/admin/users/${encodeURIComponent(user.id)}/${archived ? "archive" : "unarchive"}`,
         { method: "POST", credentials: "include" },
       );
-      if (!res.ok) throw new Error("request failed");
+      if (!res.ok) {
+        /* {"error":{"code","detail"}} — the server's own reason, e.g. you
+           cannot archive yourself, which no amount of retrying fixes. */
+        const body = (await res.json().catch(() => null)) as {
+          error?: { detail?: string };
+        } | null;
+        throw new Error(body?.error?.detail ?? "");
+      }
       const row = (await res.json()) as AdminUser;
       setUsers((prev) => prev.map((r) => (r.id === row.id ? row : r)));
-    } catch {
+    } catch (err) {
       setUsers((prev) => {
         const next = prev.filter((r) => r.id !== user.id);
         next.splice(index < 0 ? next.length : Math.min(index, next.length), 0, user);
         return next;
       });
       setArchivedTotal((n) => Math.max(0, n + (archived ? -1 : 1)));
+      const reason = err instanceof Error && err.message ? err.message : null;
       toast(
-        archived
-          ? "Couldn't archive that user. Please try again."
-          : "Couldn't restore that user. Please try again.",
+        reason ??
+          (archived
+            ? "Couldn't archive that user. Please try again."
+            : "Couldn't restore that user. Please try again."),
         "error",
       );
     } finally {
