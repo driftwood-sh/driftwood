@@ -17,6 +17,10 @@ type AdminUser = {
   avatar_url: string | null;
   is_approved: boolean;
   is_admin: boolean;
+  /* ISO timestamp, or null when the user is not archived. Archiving is a
+     visibility switch on this list only: it does not pause that customer's
+     agent, sign the person out, stop their sends, or block impersonation. */
+  archived_at: string | null;
   created_at: string;
 };
 
@@ -57,8 +61,12 @@ export function GodModeButton() {
 function ImpersonateModal({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [archivedTotal, setArchivedTotal] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const toast = useToast();
 
   // Close on Escape.
   useEffect(() => {
@@ -69,22 +77,34 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Debounced search — fetch on mount (empty q) and whenever q changes.
+  /* Debounced search — fetch on mount (empty q) and whenever q or the archived
+     filter changes. archived_total counts every archived row matching q, in or
+     out of this page, so the toggle's count stays honest at limit=50. */
   useEffect(() => {
     let cancelled = false;
     const t = window.setTimeout(async () => {
       setLoading(true);
       try {
         const res = await fetch(
-          `/api/v1/admin/users?q=${encodeURIComponent(q)}&limit=50`,
+          `/api/v1/admin/users?q=${encodeURIComponent(q)}&limit=50&include_archived=${showArchived}`,
           { credentials: "include" },
         );
         if (cancelled) return;
         if (!res.ok) throw new Error("request failed");
-        const data = (await res.json()) as { users: AdminUser[]; total: number };
-        if (!cancelled) setUsers(data.users);
+        const data = (await res.json()) as {
+          users: AdminUser[];
+          total: number;
+          archived_total: number;
+        };
+        if (!cancelled) {
+          setUsers(data.users);
+          setArchivedTotal(data.archived_total);
+        }
       } catch {
-        if (!cancelled) setUsers([]);
+        if (!cancelled) {
+          setUsers([]);
+          setArchivedTotal(0);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -93,7 +113,52 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [q]);
+  }, [q, showArchived]);
+
+  /* Archive and restore paint first, then reconcile. Every update is a
+     functional one so two rows in flight at once cannot clobber each other,
+     and a failed request puts the row back at its old index and says so —
+     the list never keeps a state the server rejected. */
+  async function setArchived(user: AdminUser, archived: boolean) {
+    const index = users.findIndex((row) => row.id === user.id);
+    const optimistic: AdminUser = {
+      ...user,
+      archived_at: archived ? new Date().toISOString() : null,
+    };
+    setBusyId(user.id);
+    setUsers((prev) =>
+      prev.flatMap((row) => {
+        if (row.id !== user.id) return [row];
+        // With the filter off, an archived row leaves the list at once.
+        return archived && !showArchived ? [] : [optimistic];
+      }),
+    );
+    setArchivedTotal((n) => Math.max(0, n + (archived ? 1 : -1)));
+    try {
+      const res = await fetch(
+        `/api/v1/admin/users/${encodeURIComponent(user.id)}/${archived ? "archive" : "unarchive"}`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) throw new Error("request failed");
+      const row = (await res.json()) as AdminUser;
+      setUsers((prev) => prev.map((r) => (r.id === row.id ? row : r)));
+    } catch {
+      setUsers((prev) => {
+        const next = prev.filter((r) => r.id !== user.id);
+        next.splice(index < 0 ? next.length : Math.min(index, next.length), 0, user);
+        return next;
+      });
+      setArchivedTotal((n) => Math.max(0, n + (archived ? -1 : 1)));
+      toast(
+        archived
+          ? "Couldn't archive that user. Please try again."
+          : "Couldn't restore that user. Please try again.",
+        "error",
+      );
+    } finally {
+      setBusyId((current) => (current === user.id ? null : current));
+    }
+  }
 
   return (
     <div
@@ -129,6 +194,26 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
           className="mt-4 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-tide/60"
         />
 
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <button
+            type="button"
+            onClick={() => setShowArchived((on) => !on)}
+            aria-pressed={showArchived}
+            className={`cursor-pointer rounded-full border px-3.5 py-2 text-[12.5px] font-medium transition-colors ${
+              showArchived
+                ? "border-tide/40 bg-tide-wash text-tide"
+                : "border-line bg-surface text-ink-soft hover:text-ink"
+            }`}
+          >
+            Archived {archivedTotal}
+          </button>
+          {showArchived && (
+            <p className="m-0 text-[12px] text-ink-soft">
+              Archiving only keeps a user out of this list, and you can still impersonate an archived user.
+            </p>
+          )}
+        </div>
+
         <div className="mt-4 min-h-0 flex-1 overflow-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -150,7 +235,9 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
                   user={u}
                   pending={impersonatingId === u.id}
                   disabled={impersonatingId !== null}
+                  archiveBusy={busyId === u.id}
                   onImpersonatingChange={setImpersonatingId}
+                  onArchivedChange={setArchived}
                 />
               ))}
             </ul>
@@ -165,14 +252,19 @@ function UserRow({
   user,
   pending,
   disabled,
+  archiveBusy,
   onImpersonatingChange,
+  onArchivedChange,
 }: {
   user: AdminUser;
   pending: boolean;
   disabled: boolean;
+  archiveBusy: boolean;
   onImpersonatingChange: (id: string | null) => void;
+  onArchivedChange: (user: AdminUser, archived: boolean) => void;
 }) {
   const displayName = user.name || user.email || "Unnamed user";
+  const archived = user.archived_at !== null;
   const toast = useToast();
 
   async function handleImpersonate() {
@@ -211,25 +303,42 @@ function UserRow({
           </span>
           {user.is_admin && <Badge>admin</Badge>}
           {user.is_approved && <Badge>approved</Badge>}
+          {archived && <Badge>archived</Badge>}
         </div>
         {user.name && user.email && (
           <div className="truncate text-[12.5px] text-ink-soft">{user.email}</div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={handleImpersonate}
-        disabled={disabled}
-        className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-ink px-3.5 py-2 text-[13px] font-medium text-white no-underline transition-all hover:-translate-y-px hover:bg-black disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending && (
-          <span
-            aria-hidden="true"
-            className="size-3.5 animate-spin rounded-full border-[1.5px] border-white/40 border-t-white"
-          />
-        )}
-        {pending ? "Entering…" : "Impersonate"}
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        {/* Archive is a list filter, so it never gates the row's real action:
+            an archived user impersonates exactly like any other. */}
+        <button
+          type="button"
+          onClick={() => onArchivedChange(user, !archived)}
+          disabled={archiveBusy || disabled}
+          className={
+            archived
+              ? "cursor-pointer rounded-full border border-tide/40 bg-surface px-3 py-2 text-[12px] font-medium text-tide hover:bg-tide-wash disabled:cursor-wait disabled:opacity-50"
+              : "cursor-pointer rounded-full border border-line bg-surface px-3 py-2 text-[12px] font-medium text-ink-soft hover:border-ink-faint hover:text-ink disabled:cursor-wait disabled:opacity-50"
+          }
+        >
+          {archived ? "Restore" : "Archive"}
+        </button>
+        <button
+          type="button"
+          onClick={handleImpersonate}
+          disabled={disabled}
+          className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-ink px-3.5 py-2 text-[13px] font-medium text-white no-underline transition-all hover:-translate-y-px hover:bg-black disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending && (
+            <span
+              aria-hidden="true"
+              className="size-3.5 animate-spin rounded-full border-[1.5px] border-white/40 border-t-white"
+            />
+          )}
+          {pending ? "Entering…" : "Impersonate"}
+        </button>
+      </div>
     </li>
   );
 }
