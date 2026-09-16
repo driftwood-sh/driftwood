@@ -17,9 +17,10 @@ type AdminUser = {
   avatar_url: string | null;
   is_approved: boolean;
   is_admin: boolean;
-  /* ISO timestamp, or null when the user is not archived. Archiving is a
-     visibility switch on this list only: it does not pause that customer's
-     agent, sign the person out, stop their sends, or block impersonation. */
+  /* ISO timestamp, or null when the user is not archived. Archiving moves the
+     user into the Archived group at the bottom of this picker: it does not
+     pause that customer's agent, sign the person out, stop their sends, or
+     block impersonation. */
   archived_at: string | null;
   created_at: string;
 };
@@ -62,7 +63,8 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [archivedTotal, setArchivedTotal] = useState(0);
-  const [showArchived, setShowArchived] = useState(false);
+  /* Collapsed on every open: the picker opens on the people you can act on. */
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -78,15 +80,16 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   /* Debounced search — fetch on mount (empty q) and whenever q or the archived
-     filter changes. archived_total counts every archived row matching q, in or
-     out of this page, so the toggle's count stays honest at limit=50. */
+     section changes. archived_total counts every archived row matching q, in
+     or out of this page, so the divider's count stays honest at limit=50 and
+     reports archived matches while the section is shut. */
   useEffect(() => {
     let cancelled = false;
     const t = window.setTimeout(async () => {
       setLoading(true);
       try {
         const res = await fetch(
-          `/api/v1/admin/users?q=${encodeURIComponent(q)}&limit=50&include_archived=${showArchived}`,
+          `/api/v1/admin/users?q=${encodeURIComponent(q)}&limit=50&include_archived=${archivedOpen}`,
           { credentials: "include" },
         );
         if (cancelled) return;
@@ -113,26 +116,22 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [q, showArchived]);
+  }, [q, archivedOpen]);
 
-  /* Archive and restore paint first, then reconcile. Every update is a
-     functional one so two rows in flight at once cannot clobber each other,
-     and a failed request puts the row back at its old index and says so —
-     the list never keeps a state the server rejected. */
+  /* Archive and restore paint first, then reconcile. The row holds its index
+     in `users` and only archived_at changes, so the groups below re-sort it
+     at once: an archived row drops out of the live list, a restored one comes
+     back up into it. Every update is a functional one so two rows in flight
+     at once cannot clobber each other, and a failed request writes the
+     original row back at the same index and says why — the list never keeps a
+     state the server rejected. */
   async function setArchived(user: AdminUser, archived: boolean) {
-    const index = users.findIndex((row) => row.id === user.id);
     const optimistic: AdminUser = {
       ...user,
       archived_at: archived ? new Date().toISOString() : null,
     };
     setBusyId(user.id);
-    setUsers((prev) =>
-      prev.flatMap((row) => {
-        if (row.id !== user.id) return [row];
-        // With the filter off, an archived row leaves the list at once.
-        return archived && !showArchived ? [] : [optimistic];
-      }),
-    );
+    setUsers((prev) => prev.map((row) => (row.id === user.id ? optimistic : row)));
     setArchivedTotal((n) => Math.max(0, n + (archived ? 1 : -1)));
     try {
       const res = await fetch(
@@ -150,11 +149,7 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
       const row = (await res.json()) as AdminUser;
       setUsers((prev) => prev.map((r) => (r.id === row.id ? row : r)));
     } catch (err) {
-      setUsers((prev) => {
-        const next = prev.filter((r) => r.id !== user.id);
-        next.splice(index < 0 ? next.length : Math.min(index, next.length), 0, user);
-        return next;
-      });
+      setUsers((prev) => prev.map((r) => (r.id === user.id ? user : r)));
       setArchivedTotal((n) => Math.max(0, n + (archived ? -1 : 1)));
       const reason = err instanceof Error && err.message ? err.message : null;
       toast(
@@ -168,6 +163,12 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
       setBusyId((current) => (current === user.id ? null : current));
     }
   }
+
+  /* One list, two groups. The live group is the picker; archived rows only
+     ever render under the divider, so an archived account can never sit
+     between two live ones. */
+  const liveUsers = users.filter((row) => row.archived_at === null);
+  const archivedUsers = users.filter((row) => row.archived_at !== null);
 
   return (
     <div
@@ -203,28 +204,6 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
           className="mt-4 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-tide/60"
         />
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <button
-            type="button"
-            onClick={() => setShowArchived((on) => !on)}
-            aria-pressed={showArchived}
-            className={`cursor-pointer rounded-full border px-3.5 py-2 text-[12.5px] font-medium transition-colors ${
-              showArchived
-                ? "border-tide/40 bg-tide-wash text-tide"
-                : "border-line bg-surface text-ink-soft hover:text-ink"
-            }`}
-          >
-            Archived {archivedTotal}
-          </button>
-          {showArchived && (
-            <p className="m-0 text-[12px] text-ink-soft">
-              An archived user stays out of this list and the fleet page. They can
-              still sign in, their agent keeps running, and you can still impersonate
-              them.
-            </p>
-          )}
-        </div>
-
         <div className="mt-4 min-h-0 flex-1 overflow-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -234,24 +213,74 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
                 aria-label="Searching"
               />
             </div>
-          ) : users.length === 0 ? (
-            <p className="m-0 py-10 text-center text-[13.5px] text-ink-soft">
-              No users found.
-            </p>
           ) : (
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-              {users.map((u) => (
-                <UserRow
-                  key={u.id}
-                  user={u}
-                  pending={impersonatingId === u.id}
-                  disabled={impersonatingId !== null}
-                  archiveBusy={busyId === u.id}
-                  onImpersonatingChange={setImpersonatingId}
-                  onArchivedChange={setArchived}
-                />
-              ))}
-            </ul>
+            <>
+              {liveUsers.length === 0 ? (
+                <p className="m-0 py-10 text-center text-[13.5px] text-ink-soft">
+                  {archivedTotal > 0 ? "No users found in the main list." : "No users found."}
+                </p>
+              ) : (
+                <ul className="m-0 flex list-none flex-col gap-1.5 p-0" aria-label="Users">
+                  {liveUsers.map((u) => (
+                    <UserRow
+                      key={u.id}
+                      user={u}
+                      pending={impersonatingId === u.id}
+                      disabled={impersonatingId !== null}
+                      archiveBusy={busyId === u.id}
+                      onImpersonatingChange={setImpersonatingId}
+                      onArchivedChange={setArchived}
+                    />
+                  ))}
+                </ul>
+              )}
+
+              {/* The line that closes the live list. Its count is archived_total
+                  for the current q, so a shut section still reports matches. */}
+              <button
+                type="button"
+                onClick={() => setArchivedOpen((open) => !open)}
+                aria-expanded={archivedOpen}
+                aria-controls="impersonate-archived"
+                className="mt-2.5 flex w-full cursor-pointer items-center gap-2.5 border-0 bg-transparent px-0.5 py-2 text-left text-[12px] font-medium text-ink-soft transition-colors hover:text-ink"
+              >
+                <span className="shrink-0">Archived {archivedTotal}</span>
+                <span className="h-px flex-1 bg-line" aria-hidden="true" />
+                <span className="shrink-0 font-normal text-ink-faint">
+                  {archivedOpen ? "Hide" : "Show"}
+                </span>
+              </button>
+
+              {archivedOpen && (
+                <section id="impersonate-archived" aria-label="Archived users">
+                  <p className="m-0 px-0.5 pb-2.5 text-[12px] leading-[1.45] text-ink-soft">
+                    An archived user stays out of the list above and off the fleet page.
+                    They can still sign in, their agent keeps running, and you can still
+                    impersonate them.
+                  </p>
+                  {archivedUsers.length === 0 ? (
+                    <p className="m-0 px-0.5 pb-1 text-[12.5px] text-ink-soft">
+                      {q ? "No archived users match this search." : "No archived users."}
+                    </p>
+                  ) : (
+                    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                      {archivedUsers.map((u) => (
+                        <UserRow
+                          key={u.id}
+                          user={u}
+                          muted
+                          pending={impersonatingId === u.id}
+                          disabled={impersonatingId !== null}
+                          archiveBusy={busyId === u.id}
+                          onImpersonatingChange={setImpersonatingId}
+                          onArchivedChange={setArchived}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -261,6 +290,7 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
 
 function UserRow({
   user,
+  muted = false,
   pending,
   disabled,
   archiveBusy,
@@ -268,6 +298,9 @@ function UserRow({
   onArchivedChange,
 }: {
   user: AdminUser;
+  /* Archived rows read quieter than live ones, but stay legible: the name
+     drops to body gray, never to a faint tint. */
+  muted?: boolean;
   pending: boolean;
   disabled: boolean;
   archiveBusy: boolean;
@@ -294,7 +327,11 @@ function UserRow({
   }
 
   return (
-    <li className="flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5">
+    <li
+      className={`flex items-center gap-3 rounded-xl border border-line px-3 py-2.5 ${
+        muted ? "bg-sand/50" : "bg-surface"
+      }`}
+    >
       {user.avatar_url ? (
         <img
           src={user.avatar_url}
@@ -303,13 +340,19 @@ function UserRow({
           referrerPolicy="no-referrer"
         />
       ) : (
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-tide text-[13px] font-semibold text-white">
+        <span
+          className={`flex size-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white ${
+            muted ? "bg-ink-faint" : "bg-tide"
+          }`}
+        >
           {displayName[0]?.toUpperCase()}
         </span>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-[14px] font-medium text-ink">
+          <span
+            className={`truncate text-[14px] font-medium ${muted ? "text-ink-soft" : "text-ink"}`}
+          >
             {user.name || user.email || "Unnamed user"}
           </span>
           {user.is_admin && <Badge>admin</Badge>}
@@ -321,8 +364,9 @@ function UserRow({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {/* Archive is a list filter, so it never gates the row's real action:
-            an archived user impersonates exactly like any other. */}
+        {/* Archive only decides which group the row sits in, so it never gates
+            the row's real action: an archived user impersonates exactly like
+            any other. */}
         <button
           type="button"
           onClick={() => onArchivedChange(user, !archived)}
