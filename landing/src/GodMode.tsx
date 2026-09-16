@@ -209,7 +209,9 @@ function ImpersonateModal({ onClose }: { onClose: () => void }) {
           </button>
           {showArchived && (
             <p className="m-0 text-[12px] text-ink-soft">
-              Archiving only keeps a user out of this list, and you can still impersonate an archived user.
+              An archived user stays out of this list and the fleet page. They can
+              still sign in, their agent keeps running, and you can still impersonate
+              them.
             </p>
           )}
         </div>
