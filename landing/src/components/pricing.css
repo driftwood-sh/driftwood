@@ -1,0 +1,105 @@
+/* perfect-ui · <design_plan> v2.5.0
+ * Verified in plans/2026-09-18-pricing/draft-09.md.
+ * Restrained comparison with blue actions and inline allowances.
+ */
+.landing .pricing-section {
+  --pricing-ink: #202020;
+  --pricing-muted: #626262;
+  --pricing-line: #e8e8e8;
+  --pricing-blue: #15557e;
+  --pricing-highlight: #f7f7f7;
+  padding-block: clamp(3rem, 5vw, 4.5rem) clamp(4rem, 6vw, 6rem);
+  scroll-margin-top: 4rem;
+  color: var(--pricing-ink);
+}
+.landing .pricing-intro { margin-bottom: 2.5rem; }
+.landing .pricing-intro h1, .landing .pricing-intro h2 {
+  font-size: clamp(2rem, 3vw, 2.5rem);
+  line-height: 1.15; font-weight: 600; letter-spacing: -0.03em;
+}
+.landing .pricing-billing { margin-top: 0.8rem; color: var(--pricing-muted); font-size: 0.95rem; line-height: 1.5; }
+.landing .pricing-plans {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--pricing-line); border-radius: 12px;
+}
+.landing .pricing-plan {
+  display: grid; grid-template-rows: subgrid; grid-row: span 10;
+  padding: 2rem; min-width: 0;
+}
+.landing .pricing-plan-growth { background: var(--pricing-highlight); }
+.landing .pricing-plan + .pricing-plan { border-left: 1px solid var(--pricing-line); }
+.landing .pricing-plan-name { margin: 0; font-size: 1.3rem; line-height: 1.3; font-weight: 500; letter-spacing: -0.02em; }
+.landing .pricing-rate { padding-top: 1.75rem; }
+.landing .pricing-price { display: flex; align-items: baseline; gap: 0.45rem; }
+.landing .pricing-from { font-size: 0.8rem; font-weight: 400; }
+.landing .pricing-price strong {
+  font-size: clamp(2rem, 3vw, 2.6rem); line-height: 1.15; font-weight: 600;
+  letter-spacing: -0.045em; font-variant-numeric: tabular-nums;
+}
+.landing .pricing-cadence { margin-top: 0.4rem; color: var(--pricing-muted); font-size: 0.8rem; line-height: 1.5; }
+.landing .pricing-action { padding-block: 1.5rem; }
+.landing .pricing-section .pricing-cta {
+  width: 100%; height: 2.75rem; padding-inline: 1rem; border: 1px solid var(--pricing-blue);
+  border-radius: 6px; background: var(--pricing-blue); color: #fff;
+  font-size: 0.875rem; font-weight: 500; transition: background 0.15s;
+}
+.landing .pricing-section .pricing-cta:hover { background: #0d3c5b; border-color: #0d3c5b; transform: none; }
+.landing .pricing-section .pricing-cta:active { background: #082a40; border-color: #082a40; }
+.landing .pricing-section :focus-visible { outline-color: var(--pricing-blue); outline-offset: 4px; }
+.landing .pricing-plan-details { display: grid; grid-template-rows: subgrid; grid-row: span 7; border-top: 1px solid var(--pricing-line); padding-top: 1.5rem; }
+.landing .pricing-features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-rows: subgrid; grid-row: span 7; gap: 0.75rem; font-size: 0.9375rem; line-height: 1.55; }
+.landing .pricing-features li { display: flex; align-items: flex-start; gap: 0.65rem; }
+.landing .pricing-features svg { flex: 0 0 1rem; width: 1rem; height: 1rem; margin-top: 0.16rem; }
+.landing .pricing-features strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.landing .pricing-allowance strong { font-size: inherit; }
+.landing .pricing-allowance + li:not(.pricing-allowance) { margin-top: 0.75rem; }
+.landing .pricing-page-link { margin-top: 1.5rem; font-size: 0.85rem; }
+.landing .pricing-page-link a { text-decoration: underline; text-underline-offset: 0.25em; }
+.landing .nav-pricing { display: inline-flex; align-items: center; min-height: 2.75rem; font-size: 0.9rem; text-decoration: none; color: var(--gray); }
+.landing .nav-pricing:hover, .landing .nav-pricing[aria-current="page"] { color: var(--accent); }
+.landing .skip-link { position: fixed; top: 0.5rem; left: 1rem; z-index: 50; transform: translateY(-200%); background: var(--color-paper); padding: 0.65rem 1rem; border-radius: 4px; }
+.landing .skip-link:focus { transform: none; }
+.landing #book { scroll-margin-top: 4rem; }
+
+/* The pricing page is a neutral surface; the homepage retains its own chrome. */
+.landing.pricing-page { --accent: #15557e; --ink: #202020; --gray: #626262; --line: #e8e8e8; }
+.landing.pricing-page .nav-right { margin-right: 0; }
+.landing.pricing-page .nav .btn { background: var(--accent); border-radius: 6px; }
+.landing.pricing-page .nav .btn:hover { background: #0d3c5b; transform: none; }
+.landing.pricing-page footer { background: #fff; color: var(--ink); border-top: 1px solid var(--line); }
+.landing.pricing-page footer::before { display: none; }
+.landing.pricing-page .foot .wordmark { color: var(--ink); }
+.landing.pricing-page .foot-def,
+.landing.pricing-page .foot-col,
+.landing.pricing-page .foot-col-head,
+.landing.pricing-page .foot-bottom { color: var(--gray); }
+.landing.pricing-page .foot-col-head { color: var(--ink); font-weight: 500; }
+.landing.pricing-page .foot-bottom { border-top-color: var(--line); }
+.landing.pricing-page .foot a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 0.2em; }
+
+@media (max-width: 60rem) {
+  .landing .pricing-plan { padding: 1.25rem; }
+}
+@media (max-width: 46rem) {
+  .landing .pricing-intro { margin-bottom: 2rem; }
+  .landing .pricing-plans { grid-template-columns: 1fr; }
+  .landing .pricing-plan { display: block; grid-row: auto; padding: 1.5rem; }
+  .landing .pricing-plan + .pricing-plan { border-left: 0; border-top: 1px solid var(--pricing-line); }
+  .landing .pricing-price strong { font-size: 2.25rem; }
+  .landing .pricing-plan-details { display: block; }
+  .landing .pricing-features { grid-template-rows: none; grid-row: auto; }
+}
+@media (max-width: 40rem) {
+  .landing .nav-login { display: none; }
+  .landing .nav-right { gap: 0.85rem; }
+  .landing .nav .btn { padding-inline: 1rem; min-height: 2.75rem; }
+}
+@media (max-width: 23rem) {
+  .landing .nav-right { gap: 0.65rem; }
+  .landing .wordmark { gap: 0.4rem; font-size: 1.05rem; }
+  .landing .nav .btn { font-size: 0.8rem; padding-inline: 0.8rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(.landing) { scroll-behavior: auto; }
+  .landing .pricing-section .pricing-cta { transition: none; }
+}

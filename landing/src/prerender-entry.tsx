@@ -6,12 +6,13 @@
 import { StrictMode, Suspense } from "react";
 import { renderToString } from "react-dom/server";
 import App from "./App";
+import Pricing from "./Pricing";
 
-export function render(): string {
+export function render(path = "/"): string {
   return renderToString(
     <StrictMode>
       <Suspense fallback={null}>
-        <App />
+        {path === "/pricing" ? <Pricing /> : <App />}
       </Suspense>
     </StrictMode>,
   );

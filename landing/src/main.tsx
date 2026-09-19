@@ -32,14 +32,14 @@ const Team = lazy(() => import('./team/Team.tsx'))
 const Inbox = lazy(() => import('./inbox/Inbox.tsx'))
 const SettingsTabs = lazy(() => import('./settings/SettingsTabs.tsx'))
 const Settings = lazy(() => import('./settings/Settings.tsx'))
-// Pricing is parked for now; re-enable by restoring the route below.
-// const Pricing = lazy(() => import('./Pricing.tsx'))
+const Pricing = lazy(() => import('./Pricing.tsx'))
 
 const requestedPath = window.location.pathname.replace(/\/+$/, '')
 // Vercel rewrites every /dashboard route to the lean dashboard document while
 // preserving the public URL. Opening that document directly should still land
 // on the workspace overview instead of rendering the marketing page.
-const path = requestedPath === '/dashboard.html' ? '/dashboard' : requestedPath
+const path = requestedPath === '/dashboard.html' ? '/dashboard'
+  : requestedPath === '/pricing/index.html' ? '/pricing' : requestedPath
 // /dashboard/demos/library was the demo library's own page. Staging holds
 // the library now, so a link already shared opens the Demos page on Staging
 // instead of a page that is no longer there.
@@ -49,10 +49,11 @@ if (isLibraryPath) {
 }
 const campaignPathMatch = path.match(/^\/dashboard\/campaigns\/([^/]+)$/)
 const triggerPathMatch = path.match(/^\/dashboard\/triggers\/([^/]+)$/)
-// const page = path === '/pricing' ? <Pricing /> : <App />
 // /og renders the social card; screenshot it at 1200x630 (dpr 2) to refresh public/og-5.png
 const page =
-  path === '/og' ? (
+  path === '/pricing' ? (
+    <Pricing />
+  ) : path === '/og' ? (
     <OgCard />
   ) : path === '/dashboard/audiences' || path === '/dashboard/lead-lists' ? (
     <WorkspacePage active="audiences"><Audiences /></WorkspacePage>
@@ -132,7 +133,7 @@ const tree = (
   </StrictMode>
 )
 
-// prod index.html ships with the landing prerendered into #root (AI crawlers
+// Marketing documents ship with their page prerendered into #root (AI crawlers
 // don't run JS — scripts/prerender.mjs puts the real content in the HTML).
 // The landing hydrates it; app pages clear it and mount fresh. Dev serves an
 // empty #root and falls through to a plain client render.

@@ -403,3 +403,49 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
 - Dashboard *behavior* (loading states, action feedback, consistency) has its
   own testable bar: `design/ux-principles.md`. Audit and fix against that
   file; tokens and voice stay here.
+
+## 8. Pricing
+
+- The homepage pricing section sits between the dashboard and the existing
+  open-water seam before booking. `/pricing` uses the same component and the
+  same marketing header/footer content, with neutral page chrome and a straight
+  footer border.
+- All three plans share one quiet, bordered comparison with equal-width
+  columns and aligned names, prices, CTAs, and allowances. Enterprise has the
+  same visual weight as Startup. Growth has a subtle #f7f7f7 neutral background
+  to give the comparison a focal point. No unsupported popularity badge.
+  This replaces the two-card/Enterprise-band draft after the pricing reference
+  review on 2026-09-18. Familiar comparison structure is intentional.
+- Prices use Public Sans with tabular numbers. State USD and the monthly
+  cadence next to every price. Keep "From" attached to Enterprise pricing.
+- Plan names lead directly into their prices. Omit buyer-description
+  subheadings; the allowances and features carry the plan differences.
+- Startup includes 1,000 personalized contacts and up to 250 demos per month;
+  Growth includes 5,000 personalized contacts and up to 1,000 demos per month.
+  Show contacts and demos as separate feature rows, with the number first.
+  Label the demo cap with a trailing “maximum” so the count leads the row.
+  The three allowance rows use inline semibold figures at the same size as
+  their labels, without checkmarks;
+  feature rows retain their checks. Enterprise volumes are set on a call.
+- Keep the header short with billing terms immediately beneath it. Each plan
+  lists its own allowances and shared benefits explicitly, so it can be read
+  independently. No inheritance text (“Everything in…”), list-introduction
+  label, separate shared benefits block, or “One prospect. One demo.” block.
+  All content is readable without JavaScript.
+- Keep the cards concise: show contact, demo, and inbox counts first. Channels
+  and founder Slack are repeated in all three plans.
+  Lead sourcing and domain purchasing remain included but their separate
+  feature rows are omitted from the cards.
+- **Pricing is a user-directed exception to the global voice/color rules**
+  (2026-09-18): plain Public Sans, no italics, no colored heading accents. A
+  simple “Pricing” heading, 500-weight plan names, 600-weight prices, regular
+  0.9375rem feature text with 0.75rem row gaps, and 1px #e8e8e8 borders. The brand wordmark
+  remains unchanged. All pricing CTAs and the pricing header booking button use
+  #15557e blue with a 6px radius and #0d3c5b hover feedback.
+- All three pricing CTAs say “Book a demo”, link to /#book, and track their
+  respective tier placement, including pricing-enterprise.
+- Pricing adds no scroll animation. Links retain visible focus. No chromatic
+  tier accents, shadows, or decorative badges. The comparison has 12px outer
+  corners and slightly roomier column padding.
+- On narrow phones the header prioritizes Pricing and Book a demo; Log in is
+  hidden below 40rem to keep the controls from colliding with the wordmark.

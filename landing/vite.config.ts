@@ -1,13 +1,31 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// Mirror the production rewrite in local dev and preview so /pricing serves
+// its own metadata and prerendered document rather than the homepage fallback.
+function pricingDocument(): Plugin {
+  const rewrite = (req: IncomingMessage, _res: ServerResponse, next: () => void) => {
+    if (req.url && /^\/pricing\/?(?:\?|$)/.test(req.url)) {
+      req.url = req.url.replace(/^\/pricing\/?(?=\?|$)/, '/pricing/index.html')
+    }
+    next()
+  }
+  return {
+    name: 'pricing-document',
+    configureServer(server) { server.middlewares.use(rewrite) },
+    configurePreviewServer(server) { server.middlewares.use(rewrite) },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), pricingDocument()],
   build: {
     rollupOptions: {
       input: {
         main: 'index.html',
+        pricing: 'pricing/index.html',
         dashboard: 'dashboard.html',
         admin: 'admin.html',
       },

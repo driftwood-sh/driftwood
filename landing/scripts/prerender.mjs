@@ -5,19 +5,20 @@
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 
 const { render } = await import("../dist-ssr/prerender-entry.js");
-const html = render();
-if (html.length < 5_000) {
-  throw new Error(`prerender output suspiciously small (${html.length} chars)`);
+for (const [path, file] of [["/", "index.html"], ["/pricing", "pricing/index.html"]]) {
+  const html = render(path);
+  if (html.length < 5_000) {
+    throw new Error(`prerender output for ${path} suspiciously small (${html.length} chars)`);
+  }
+  const target = new URL(`../dist/${file}`, import.meta.url);
+  const doc = readFileSync(target, "utf8");
+  const anchor = '<div id="root"></div>';
+  if (!doc.includes(anchor)) {
+    throw new Error(`dist/${file} has no empty #root div to fill`);
+  }
+  writeFileSync(target, doc.replace(anchor, `<div id="root">${html}</div>`));
+  console.log(`prerendered ${path} into dist/${file} (+${(html.length / 1024).toFixed(1)} kB of markup)`);
 }
-
-const target = new URL("../dist/index.html", import.meta.url);
-const doc = readFileSync(target, "utf8");
-const anchor = '<div id="root"></div>';
-if (!doc.includes(anchor)) {
-  throw new Error("dist/index.html has no empty #root div to fill");
-}
-writeFileSync(target, doc.replace(anchor, `<div id="root">${html}</div>`));
-console.log(`prerendered landing into dist/index.html (+${(html.length / 1024).toFixed(1)} kB of markup)`);
 
 /* Stamp the sitemap's lastmod with the build date — the hand-written date in
    public/sitemap.xml rots silently otherwise. */

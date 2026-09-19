@@ -18,6 +18,7 @@ B2B founders and teams who do cold outbound (email or LinkedIn) and want every m
 
 ## Pages
 
+- [Pricing: Startup, Growth, and Enterprise](https://driftwood.sh/pricing)
 - [What is demo-led outbound (definition)](https://driftwood.sh/demo-led-outbound)
 - [Customer story, Autosana (YC S25), replies from under 1% to over 14% in week one](https://driftwood.sh/customers/autosana)
 - [FAQ (what driftwood is, how it works, pricing)](https://driftwood.sh/faq)

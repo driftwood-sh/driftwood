@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/pricing.css";
 
 /* self-hosted fonts (latin subsets via fontsource, files in public/fonts):
    no render-blocking Google Fonts round-trips, no third-party dependency.

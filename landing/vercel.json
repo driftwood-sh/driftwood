@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/pricing",
+      "destination": "/pricing/index.html"
+    },
+    {
+      "source": "/pricing/",
+      "destination": "/pricing/index.html"
+    },
+    {
       "source": "/d/:slug*",
       "destination": "https://driftwood-backend-767736087356.us-central1.run.app/d/:slug*"
     },

@@ -6,7 +6,7 @@
 import { track } from "@vercel/analytics";
 import posthog from "posthog-js";
 
-export function trackCta(placement: "nav" | "hero" | "close") {
+export function trackCta(placement: "nav" | "hero" | "close" | "pricing-startup" | "pricing-growth" | "pricing-enterprise") {
   track("book_demo", { placement });
   posthog.capture("book_demo", { placement });
 }
