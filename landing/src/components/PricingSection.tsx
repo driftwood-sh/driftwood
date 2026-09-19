@@ -5,8 +5,6 @@ const PLANS = [
     name: "Startup",
     price: "$2,000",
     contacts: "1,000",
-    demos: "250",
-    inboxes: "10",
     cta: "Book a demo",
     href: "/#book",
     placement: "pricing-startup",
@@ -16,8 +14,6 @@ const PLANS = [
     name: "Growth",
     price: "$5,000",
     contacts: "5,000",
-    demos: "1,000",
-    inboxes: "50",
     cta: "Book a demo",
     href: "/#book",
     placement: "pricing-growth",
@@ -27,8 +23,6 @@ const PLANS = [
     name: "Enterprise",
     price: "$10,000",
     contacts: "Custom",
-    demos: "Custom",
-    inboxes: "Custom",
     cta: "Book a demo",
     href: "/#book",
     placement: "pricing-enterprise",
@@ -38,6 +32,7 @@ const PLANS = [
 
 const INCLUDED = [
   "Email, LinkedIn and X",
+  "Inbox warming",
   "Slack channel with the founders",
 ];
 
@@ -78,8 +73,6 @@ export default function PricingSection({ standalone = false }: { standalone?: bo
               <div className="pricing-plan-details">
                 <ul className="pricing-features">
                   <li className="pricing-allowance"><span><strong>{plan.contacts}</strong> personalized contacts{!plan.custom && " /mo"}</span></li>
-                  <li className="pricing-allowance"><span><strong>{plan.demos}</strong> {plan.custom ? "demo volume" : "demos per month maximum"}</span></li>
-                  <li className="pricing-allowance"><span><strong>{plan.inboxes}</strong> warmed inboxes</span></li>
                   {INCLUDED.map((feature) => <li key={feature}><Check /><span>{feature}</span></li>)}
                   {plan.custom && (
                     <>

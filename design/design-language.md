@@ -420,21 +420,16 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
   cadence next to every price. Keep "From" attached to Enterprise pricing.
 - Plan names lead directly into their prices. Omit buyer-description
   subheadings; the allowances and features carry the plan differences.
-- Startup includes 1,000 personalized contacts and up to 250 demos per month;
-  Growth includes 5,000 personalized contacts and up to 1,000 demos per month.
-  Show contacts and demos as separate feature rows, with the number first.
-  Use “/mo” on contact rows so the allowance stays on one line. Stack plans
-  below 900px, with narrower phone padding to retain readable type.
-  Label the demo cap with a trailing “maximum” so the count leads the row.
-  The three allowance rows use inline semibold figures at the same size as
-  their labels, without checkmarks;
-  feature rows retain their checks. Enterprise volumes are set on a call.
+- Startup includes 1,000 personalized contacts per month; Growth includes 5,000.
+  Contact allowances use “/mo” and inline semibold counts. Demo allowances and
+  inbox counts are not public pricing details. Inbox warming is a checked
+  benefit in every plan. Stack plans below 900px.
 - Keep the header short with billing terms immediately beneath it. Each plan
   lists its own allowances and shared benefits explicitly, so it can be read
   independently. No inheritance text (“Everything in…”), list-introduction
   label, separate shared benefits block, or “One prospect. One demo.” block.
   All content is readable without JavaScript.
-- Keep the cards concise: show contact, demo, and inbox counts first. Channels
+- Keep the cards concise: show contact allowances first. Inbox warming, channels
   and founder Slack are repeated in all three plans.
   Lead sourcing and domain purchasing remain included but their separate
   feature rows are omitted from the cards.
@@ -451,3 +446,7 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
   corners and slightly roomier column padding.
 - On narrow phones the header prioritizes Pricing and Book a demo; Log in is
   hidden below 40rem to keep the controls from colliding with the wordmark.
+
+- The pricing page repeats the exact homepage customer-story section below the
+  plans: same videos, quotes, logos, heading, and scrolling behavior via a shared
+  CustomerStories component. Customer quotes remain verbatim.

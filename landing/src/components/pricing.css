@@ -23,7 +23,7 @@
   border: 1px solid var(--pricing-line); border-radius: 12px;
 }
 .landing .pricing-plan {
-  display: grid; grid-template-rows: subgrid; grid-row: span 10;
+  display: grid; grid-template-rows: subgrid; grid-row: span 9;
   padding: 2rem; min-width: 0;
 }
 .landing .pricing-plan-growth { background: var(--pricing-highlight); }
@@ -46,8 +46,8 @@
 .landing .pricing-section .pricing-cta:hover { background: #0d3c5b; border-color: #0d3c5b; transform: none; }
 .landing .pricing-section .pricing-cta:active { background: #082a40; border-color: #082a40; }
 .landing .pricing-section :focus-visible { outline-color: var(--pricing-blue); outline-offset: 4px; }
-.landing .pricing-plan-details { display: grid; grid-template-rows: subgrid; grid-row: span 7; border-top: 1px solid var(--pricing-line); padding-top: 1.5rem; }
-.landing .pricing-features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-rows: subgrid; grid-row: span 7; gap: 0.75rem; font-size: 0.9375rem; line-height: 1.55; }
+.landing .pricing-plan-details { display: grid; grid-template-rows: subgrid; grid-row: span 6; border-top: 1px solid var(--pricing-line); padding-top: 1.5rem; }
+.landing .pricing-features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-rows: subgrid; grid-row: span 6; gap: 0.75rem; font-size: 0.9375rem; line-height: 1.55; }
 .landing .pricing-features li { display: flex; align-items: flex-start; gap: 0.65rem; }
 .landing .pricing-features svg { flex: 0 0 1rem; width: 1rem; height: 1rem; margin-top: 0.16rem; }
 .landing .pricing-features strong { font-weight: 600; font-variant-numeric: tabular-nums; }

@@ -105,7 +105,7 @@ export function MarketingNav({ pricing = false }: { pricing?: boolean }) {
   );
 }
 
-export function MarketingFooter({ homePrefix = "" }: { homePrefix?: string }) {
+export function MarketingFooter({ homePrefix = "", description }: { homePrefix?: string; description?: string }) {
   return (
     <footer>
       <div className="wrap foot">
@@ -115,9 +115,7 @@ export function MarketingFooter({ homePrefix = "" }: { homePrefix?: string }) {
               <HelmMark />driftwood
             </a>
             <p className="foot-def">
-              driftwood is an AI sales agent for demo-led outbound: it researches each prospect,
-              builds a working demo of your product for their business, and sends from your account
-              after human review.
+              {description ?? "driftwood is an AI sales agent for demo-led outbound: it researches each prospect, builds a working demo of your product for their business, and sends from your account after human review."}
             </p>
           </div>
           <nav className="foot-col" aria-label="site">
