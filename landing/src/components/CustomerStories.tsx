@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { CASE_STUDIES } from "./customer-stories";
 
-export default function CustomerStories() {
+export default function CustomerStories({ title }: { title?: string }) {
   const casesRef = useRef<HTMLDivElement>(null);
   /* case studies are a centre-focus rail: the card nearest the middle scales
      up (zooms into place) while the neighbours sit back, dimmed and smaller.
@@ -292,7 +292,7 @@ export default function CustomerStories() {
                   vocabulary — the compare section IS the slop parody. "slop"
                   carries the line, so it takes the voice accent. */}
               <h2>
-                Don&rsquo;t send your leads <em className="voice">slop</em>
+                {title ?? <>Don&rsquo;t send your leads <em className="voice">slop</em></>}
               </h2>
             </div>
             <div className="cases-rail" ref={casesRef}>

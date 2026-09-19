@@ -21,7 +21,7 @@ const PLANS = [
   },
   {
     name: "Enterprise",
-    price: "$10,000",
+    price: "Custom",
     contacts: "Custom",
     cta: "Book a demo",
     href: "/#book",
@@ -58,8 +58,8 @@ export default function PricingSection({ standalone = false }: { standalone?: bo
                 <PlanHeading id={`plan-${plan.name.toLowerCase()}`} className="pricing-plan-name">{plan.name}</PlanHeading>
               </div>
               <div className="pricing-rate">
-                <p className="pricing-price">{plan.custom && <span className="pricing-from">From</span>}<strong>{plan.price}</strong></p>
-                <p className="pricing-cadence">USD per month</p>
+                <p className="pricing-price"><strong>{plan.price}</strong></p>
+                {!plan.custom && <p className="pricing-cadence">USD per month</p>}
               </div>
               <div className="pricing-action">
                 <a

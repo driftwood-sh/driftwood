@@ -104,3 +104,10 @@
   html:has(.landing) { scroll-behavior: auto; }
   .landing .pricing-section .pricing-cta { transition: none; }
 }
+
+/* Compact spacing on the dedicated pricing page; homepage keeps its rhythm. */
+.landing.pricing-page .pricing-section { padding-block: 2.5rem 2rem; }
+.landing.pricing-page .pricing-intro { margin-bottom: 1.75rem; }
+.landing.pricing-page #cases .sect { padding-block: 1.5rem 2.5rem; }
+.landing.pricing-page .cases-head { margin-bottom: 1.25rem; }
+.landing.pricing-page .cases-head h2 { font-size: 2rem; font-weight: 600; letter-spacing: -0.03em; }

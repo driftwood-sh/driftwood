@@ -417,7 +417,7 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
   This replaces the two-card/Enterprise-band draft after the pricing reference
   review on 2026-09-18. Familiar comparison structure is intentional.
 - Prices use Public Sans with tabular numbers. State USD and the monthly
-  cadence next to every price. Keep "From" attached to Enterprise pricing.
+  cadence next to every price. Enterprise displays “Custom” without a price or billing unit.
 - Plan names lead directly into their prices. Omit buyer-description
   subheadings; the allowances and features carry the plan differences.
 - Startup includes 1,000 personalized contacts per month; Growth includes 5,000.
@@ -450,3 +450,7 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
 - The pricing page repeats the exact homepage customer-story section below the
   plans: same videos, quotes, logos, heading, and scrolling behavior via a shared
   CustomerStories component. Customer quotes remain verbatim.
+
+- On the dedicated pricing page, the shared customer-story heading is
+  “Testimonials”. Compact section padding brings it closer to the plans; the
+  homepage heading and spacing stay unchanged.
