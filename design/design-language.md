@@ -423,6 +423,8 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
 - Startup includes 1,000 personalized contacts and up to 250 demos per month;
   Growth includes 5,000 personalized contacts and up to 1,000 demos per month.
   Show contacts and demos as separate feature rows, with the number first.
+  Use “/mo” on contact rows so the allowance stays on one line. Stack plans
+  below 900px, with narrower phone padding to retain readable type.
   Label the demo cap with a trailing “maximum” so the count leads the row.
   The three allowance rows use inline semibold figures at the same size as
   their labels, without checkmarks;

@@ -77,7 +77,7 @@ export default function PricingSection({ standalone = false }: { standalone?: bo
               </div>
               <div className="pricing-plan-details">
                 <ul className="pricing-features">
-                  <li className="pricing-allowance"><span><strong>{plan.contacts}</strong> personalized contacts{!plan.custom && " per month"}</span></li>
+                  <li className="pricing-allowance"><span><strong>{plan.contacts}</strong> personalized contacts{!plan.custom && " /mo"}</span></li>
                   <li className="pricing-allowance"><span><strong>{plan.demos}</strong> {plan.custom ? "demo volume" : "demos per month maximum"}</span></li>
                   <li className="pricing-allowance"><span><strong>{plan.inboxes}</strong> warmed inboxes</span></li>
                   {INCLUDED.map((feature) => <li key={feature}><Check /><span>{feature}</span></li>)}
