@@ -28,14 +28,16 @@ export default function Integrations() {
 
       <section aria-labelledby="mcp-heading" className="rounded-xl border border-line bg-white p-6 sm:p-8">
         <h2 id="mcp-heading" className="text-xl font-semibold">Connect your <em className="voice text-tide [font-family:Georgia,serif]">AI assistant</em></h2>
-        <p className="mt-3 text-gray">Use an assistant that supports remote MCP servers to explore your pipeline, browse completed demos, and manage supported outreach tasks.</p>
+        <p className="mt-3 text-gray">Connect Codex or another assistant that supports remote MCP servers to review demos, prepare outreach, and check your sending queue.</p>
         <ol className="my-5 list-decimal space-y-2 pl-5 text-sm text-gray">
           <li>Open connection settings and create a personal access token.</li>
           <li>Copy the server configuration into your assistant’s MCP settings.</li>
-          <li>Ask it to show your pipeline or list your completed demos.</li>
+          <li>Ask it to show completed demos. Approve the demos you want recipients and emails prepared for.</li>
+          <li>Review the recipient addresses and complete emails, then explicitly approve the emails you want queued.</li>
         </ol>
         <a href="/api/v1/dashboard/mcp/connect" className="inline-flex rounded-full bg-tide px-5 py-2.5 text-sm font-medium text-white hover:bg-tide-deep focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-tide">Manage MCP connections</a>
-        <p className="mt-4 text-sm text-gray">Access follows your workspace role. You can revoke tokens in connection settings. Final outreach approval stays in Driftwood; demo editing and workflow source are unavailable through the customer MCP.</p>
+        <p className="mt-4 text-sm text-gray">Demo approval prepares outreach. Email approval is a separate decision by an authorized person and follows your workspace review settings. Queued emails follow your sending schedule and limits. You can revoke access in connection settings.</p>
+        <blockquote className="mt-4 rounded-lg bg-tide-wash p-4 text-sm text-ink">“Show my demos and their approval status. For approved demos, show every recipient, subject, and complete email with the preview link. Wait for my approval of those emails before queuing them.”</blockquote>
       </section>
 
       <section aria-labelledby="cli-heading" className="rounded-xl border border-line bg-white p-6 sm:p-8">

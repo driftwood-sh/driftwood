@@ -48,12 +48,12 @@ import {
   approvedLabel,
   approvedNotScheduled,
   dayChannelTitle,
-  emailCollapsed,
   daySentence,
   decisionsFor,
   groupQueueByDay,
   groupSentByDay,
   groupStagedDemos,
+  groupEmailReviews,
   isApprovable,
   laterSummary,
   plannedClock,
@@ -80,37 +80,14 @@ import {
 } from "./staging-model";
 import "./demos-page.css";
 
-/* /dashboard/demos — the customer's own page for the demos we make them.
-
-   Three segments, and nothing on any of them describes our work. Staging is
-   every demo that is neither queued nor sent. Queue is what is going out, in
-   order, with the controls to cut it. Sent is what went out and what came
-   back.
-
-   Staging reads two sources and paints one list. Review items carry the demos
-   that already have an email written for them. The demo library carries the
-   rest: a hosted clip with no email yet is not broken, it is earlier, and
-   before this it rendered nowhere at all. staging-model.ts merges the two and
-   drops the duplicates.
-
-   Not here on purpose: "Coming", the list of names asked for through Send
-   demos. Demo requests are stored per campaign today
-   (GET /dashboard/campaigns/{id}/demo-requests) and no org-wide read exists,
-   so listing them would mean walking every campaign. It lands when the
-   backend serves one list for the workspace.
-
-   Approve runs before anyone has been found to send a demo to: it says "this
-   demo is good, send it to the right people at this company". So an approved
-   demo has no day yet, and it would sit in neither segment. It leaves Staging
-   and lands in one group at the top of Queue until its sends exist.
-
-   Four writes wait on the backend too: the per-row queue controls and the
-   staging pin. Each answers 404 until then, which the page reports beside the
-   control that was pressed rather than as a failure. The two approve
-   endpoints report the same way. */
+/* Demo approval authorizes contact discovery and drafting. Email approval is
+   separate: the customer sees each recipient and exact copy before a send is
+   queued. Staging holds demos and discovery; Review emails holds drafts;
+   Queue holds only scheduled sends. */
 
 const SEGMENTS = [
   ["staging", "Staging"],
+  ["review", "Review emails"],
   ["queue", "Queue"],
   ["sent", "Sent"],
 ] as const;
@@ -141,6 +118,7 @@ type SentData = { sends: SendRow[]; total: number };
    arming any of them disarms the rest (ux-principles rule 9). */
 type Armed =
   | { kind: "approve-all" }
+  | { kind: "approve-group"; key: string }
   | { kind: "pause" }
   | { kind: "resume" }
   | { kind: "skip"; key: string }
@@ -211,13 +189,14 @@ function writeDayState(state: Record<string, boolean>) {
    is all in one segment never lands on an empty page. */
 function segmentFromUrl(): Segment | null {
   const value = new URLSearchParams(window.location.search).get("seg");
-  return value === "queue" || value === "sent" || value === "staging" ? value : null;
+  return value === "queue" || value === "sent" || value === "staging" || value === "review" ? value : null;
 }
 
 /* The segment a page with no explicit choice opens on: the first one that
    has rows. Staging when every list is empty, because that is where a
    workspace's first demo shows up. */
-function firstWithRows(staging: number, queue: number, sent: number): Segment {
+function firstWithRows(staging: number, review: number, queue: number, sent: number): Segment {
+  if (review > 0) return "review";
   if (staging > 0) return "staging";
   if (queue > 0) return "queue";
   if (sent > 0) return "sent";
@@ -282,7 +261,7 @@ export default function DemosPage() {
   const [library, setLibrary] = useState<Load<LibraryData>>({ status: "loading" });
   const [queue, setQueue] = useState<Load<QueueData>>({ status: "loading" });
   const [sent, setSent] = useState<Load<SentData>>({ status: "loading" });
-  const [autoApproved, setAutoApproved] = useState<boolean | null>(null);
+  const [autoApproved, setAutoApproved] = useState(false);
   const [replied, setReplied] = useState<ReadonlySet<string>>(new Set());
 
   /* Per-card and per-row work in flight, keyed the way the press was. */
@@ -465,29 +444,20 @@ export default function DemosPage() {
       );
       const queued = queueRows(queuePage?.sends ?? [], new Set(), EMPTY_SENDERS);
       const sentRows = groupSentByDay(sentPage?.sends ?? []);
-      /* A workspace whose every demo is approved and waiting has nothing in
-         Staging and no days in Queue, and the group at the top of Queue is
-         the only place its work is. So the group counts here too. */
+      /* Pending discovery stays in Staging. Ready email reviews take priority
+         when the customer has not chosen a tab. */
       const waiting = approvedNotScheduled(libraryPage?.demos ?? []);
       setSegment(
         (picked) =>
           picked ??
-          firstWithRows(staged.length, queued.length + waiting.length, sentRows.length),
+          firstWithRows(staged.filter((demo) => demo.library !== null).length + waiting.length, staged.filter((demo) => demo.canDecide).length, queued.length, sentRows.length),
       );
     })();
   }, [loadStaging, loadLibrary, loadQueue, loadSent]);
 
   useEffect(() => {
     let live = true;
-    approvalPolicy().then(
-      (policy) => {
-        if (live) setAutoApproved(policy.mode === "auto");
-      },
-      () => {
-        /* The mode is unknown, so the page shows the cards it was given. */
-        if (live) setAutoApproved(false);
-      },
-    );
+    approvalPolicy().then((policy) => { if (live) setAutoApproved(policy.mode === "auto"); }, () => {});
     workspaceSettings().then(
       (page) => {
         if (!live) return;
@@ -508,6 +478,22 @@ export default function DemosPage() {
       live = false;
     };
   }, []);
+
+  useEffect(() => {
+    // Keep progress and new drafts current without making the user reload.
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadStaging(true);
+      void loadLibrary(true);
+      void loadQueue(true);
+    };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadStaging, loadLibrary, loadQueue]);
 
   /* An armed button disarms itself after a beat, so no stale confirm waits to
      be fat-fingered minutes later, and Escape disarms it on purpose: waiting
@@ -584,18 +570,17 @@ export default function DemosPage() {
   /* The cards a decision can act on: the ones with an email, whose review
      item the decide endpoint names. */
   const decidable = stagedDemos.filter((demo) => demo.canDecide);
-  /* The cards an approve can act on: the ones with no email of their own that
-     nobody has approved yet. The two lists never overlap, and Approve all
-     covers both. */
+  /* Only demo approval participates in the bulk action. Email approval stays
+     on the individual card next to the exact recipient and copy. */
   const approvable = approvableDemos(stagedDemos);
-  /* Approved, and nobody to send it to yet: the group above the queue's days.
-     It reads the library, because that is the only source that carries the
-     approval of a demo with no sends behind it. */
+  /* Approved demos still preparing recipients belong in Staging. */
   const approvedRows = approvedNotScheduled(
     library.status === "ready" ? library.data.rows : [],
   );
   /* What one press of Approve all covers, and the number it confirms with. */
-  const approveAllCount = decidable.length + approvable.length;
+  const approveAllCount = approvable.length;
+  const libraryCards = stagedDemos.filter((demo) => demo.library !== null);
+  const emailGroups = groupEmailReviews(decidable);
 
   const rows =
     /* The account pools are no longer read here: the From cell comes from the
@@ -630,7 +615,7 @@ export default function DemosPage() {
      workspace's first demo shows up. */
   const shown: Segment = segment ?? "staging";
 
-  /* One decide POST per press: every pending item of the demo, together. */
+  /* One decide POST carries only the email copy the customer just reviewed. */
   async function submitDecision(
     demo: StagedDemo,
     decision: "approve" | "deny",
@@ -640,7 +625,12 @@ export default function DemosPage() {
     markBusy(demo.key, true);
     setCardError(null);
     try {
-      await decide(decisionsFor(demo, decision, reason), demo.policyVersion);
+      const result = await decide(decisionsFor(demo, decision, reason), demo.policyVersion);
+      if (result.skipped.length) {
+        void loadStaging(true);
+        void loadQueue(true);
+        throw new Error("Some items changed or were already reviewed. Refreshing reviews and Queue; check which emails were approved before trying again.");
+      }
       setStaging((prev) =>
         prev.status === "ready"
           ? {
@@ -683,6 +673,19 @@ export default function DemosPage() {
     } finally {
       markBusy(demo.key, false);
     }
+  }
+
+  async function approveEmailGroup(group: ReturnType<typeof groupEmailReviews>[number]) {
+    const emails = group.emails;
+    if (!emails.length || emails.some((email) => !email.canDecide || !email.lead?.email || email.policyVersion !== emails[0].policyVersion)) return;
+    const key = `email-group:${group.key}`;
+    emails.forEach((email) => markBusy(email.key, true));
+    await submitDecision({
+      ...emails[0], key, lead: null,
+      itemIds: [...new Set(emails.flatMap((email) => email.itemIds))],
+      decidableIds: [...new Set(emails.flatMap((email) => email.decidableIds))],
+    }, "approve", undefined, `${emails.length} emails approved. Check Queue for their sending times.`);
+    emails.forEach((email) => markBusy(email.key, false));
   }
 
   /* A demo with no email yet has no review item, so a change to it cannot be
@@ -766,7 +769,7 @@ export default function DemosPage() {
     const ok = await runApprove(demoKey, demo.key, undefined, (message) =>
       setCardError({ key: demo.key, message }),
     );
-    if (ok) toast("Approved.", "success");
+    if (ok) toast(autoApproved ? "Demo approved. Recipients and emails will be prepared for Driftwood review." : "Demo approved. Recipients and emails will be prepared for your review.", "success");
   }
 
   /* The name the customer added to a demo nobody was found for. It rides the
@@ -789,65 +792,26 @@ export default function DemosPage() {
     toast(`${name} added.`, "success");
   }
 
-  /* One press over the whole segment. The demos with no email of their own go
-     out as one bulk approve, with no cap on how many; the demos that already
-     have an email go as one decide, the way they always did. Either half can
-     be empty, and the toast counts both. */
+  /* Bulk approval is only for demos. It must never also approve email copy. */
   async function runApproveAll() {
-    const keys = approvable
-      .map(approveKeyOf)
-      .filter((key): key is string => key !== null);
-    if (keys.length === 0 && decidable.length === 0) return;
+    const keys = approvable.map(approveKeyOf).filter((key): key is string => key !== null);
+    if (keys.length === 0) return;
     markBusy("all", true);
     setCardError(null);
-    let approved = 0;
-    let failure: string | null = null;
-    if (keys.length > 0) {
-      const result = await approveDemos(keys);
-      if (result.ok) {
-        const accepted = result.result?.accepted_keys ?? keys;
-        patchApprovals(accepted, {
-          status: "queued",
-          approved_at: new Date().toISOString(),
-          note: null,
-        });
-        approved += result.result?.accepted ?? accepted.length;
-        /* Some went through and some did not: say why the rest did not,
-           rather than reporting a number that hides them. */
-        const rejected = result.result?.rejected ?? [];
-        if (rejected.length > 0) failure = rejected[0].reason;
-      } else {
-        failure = result.missing ? NOT_AVAILABLE : result.message;
-      }
-    }
-    if (!failure && decidable.length > 0) {
-      try {
-        const decisions = decidable.flatMap((demo) => decisionsFor(demo, "approve"));
-        await decide(decisions, decidable[0].policyVersion);
-        const ids = new Set(decidable.flatMap((demo) => demo.itemIds));
-        setStaging((prev) =>
-          prev.status === "ready"
-            ? {
-                status: "ready",
-                data: { ...prev.data, items: prev.data.items.filter((item) => !ids.has(item.id)) },
-              }
-            : prev,
-        );
-        approved += decidable.length;
-        void loadQueue(true);
-      } catch (error) {
-        failure = error instanceof Error ? error.message : LOAD_FAILED;
-      }
-    }
+    const result = await approveDemos(keys);
     markBusy("all", false);
-    if (approved > 0) {
-      toast(
-        `${approved.toLocaleString()} ${approved === 1 ? "demo" : "demos"} approved.`,
-        "success",
-      );
+    if (!result.ok) {
+      setCardError({ key: "all", message: result.missing ? NOT_AVAILABLE : result.message });
+      return;
+    }
+    const accepted = result.result?.accepted_keys ?? keys;
+    patchApprovals(accepted, { status: "queued", approved_at: new Date().toISOString(), note: null });
+    if (accepted.length) {
+      toast(`${accepted.length.toLocaleString()} demos approved. ${autoApproved ? "Driftwood will review recipients and emails." : "Review recipients and emails when they are ready."}`, "success");
       announceDemosCountChanged();
     }
-    if (failure) setCardError({ key: "all", message: failure });
+    const rejected = result.result?.rejected ?? [];
+    if (rejected.length) setCardError({ key: "all", message: rejected[0].reason });
   }
 
   /* Pin and its inverse. Pinning keeps a demo past the 3-day expiry, and
@@ -1049,15 +1013,10 @@ export default function DemosPage() {
     void loadStaging(true);
     void loadLibrary(true);
   };
-  /* Queue holds the approved group as well as the days, so its number counts
-     both, and it waits for the library the same way Staging does: half a list
-     is a wrong number. A library that failed outright contributes no rows, so
-     the number is the days alone rather than nothing at all. */
-  const libraryWhole =
-    library.status === "error" || (library.status === "ready" && library.data.complete);
+  /* Queue counts actual sends only, after all pages arrive. */
   const queueCount =
-    queue.status === "ready" && queue.data.complete && libraryWhole
-      ? rows.length + approvedRows.length
+    queue.status === "ready" && queue.data.complete
+      ? rows.length
       : null;
   /* The count is what the segment lists, not what the ledger holds: the
      ledger also carries connection requests, which are not demos and are not
@@ -1068,10 +1027,56 @@ export default function DemosPage() {
        Staging carries no number rather than a zero that reads as "empty". The
        demos with no email yet still count: they are the customer's own work,
        whoever approves. */
-    staging: autoApproved === true && stagedDemos.length === 0 ? null : stagingCount,
+    staging: stagingCount === null ? null : libraryCards.length + approvedRows.length,
+    review: staging.status === "ready" && staging.data.complete ? decidable.length : null,
     queue: queueCount,
     sent: sentCount,
   };
+
+  function emailGroupDisabledReason(group: ReturnType<typeof groupEmailReviews>[number]): string | undefined {
+    if (staging.status !== "ready" || !staging.data.complete) return "Available once every email has loaded";
+    if (group.emails.some((email) => busy.has(email.key))) return "An email decision is in progress";
+    if (group.emails.some((email) => !email.lead?.email)) return "Every recipient needs an email address";
+    if (group.emails.some((email) => email.policyVersion !== group.emails[0].policyVersion)) return "Review settings changed. Refresh the emails first";
+    return undefined;
+  }
+
+  const renderCard = (demo: StagedDemo) => (
+    <DemoCard
+      key={demo.key}
+      demo={demo}
+      busy={busy.has(demo.key)}
+      pinnable={pinnable || pinned.has(demo.key)}
+      pinned={pinned.has(demo.key)}
+      armedSkip={isArmed({ kind: "skip", key: demo.key })}
+      change={changeOpen === demo.key ? (drafts[demo.key] ?? "") : null}
+      error={cardError?.key === demo.key ? cardError.message : null}
+      approvable={isApprovable(demo)}
+      onApprove={() =>
+        demo.library
+          ? void approveCard(demo)
+          : void submitDecision(demo, "approve", undefined, "Email approved. Check Queue for its sending time.")
+      }
+      onSkip={() =>
+        armOrRun({ kind: "skip", key: demo.key }, () =>
+          void submitDecision(demo, "deny", "Recipient skipped during email review", "Skipped."),
+        )
+      }
+      onOpenChange={() =>
+        setChangeOpen((prev) => (prev === demo.key ? null : demo.key))
+      }
+      onChangeText={(text) =>
+        setDrafts((prev) => ({ ...prev, [demo.key]: text }))
+      }
+      onSendChange={() => {
+        const text = (drafts[demo.key] ?? "").trim();
+        if (!text) return;
+        if (demo.library) void sendLibraryChange(demo, text);
+        else void submitDecision(demo, "deny", text, "Change sent.");
+      }}
+      onPin={() => void togglePin(demo)}
+    />
+  );
 
   return (
     <section className="demos-page" aria-labelledby="demos-heading">
@@ -1095,8 +1100,15 @@ export default function DemosPage() {
         ))}
       </div>
 
-      {shown === "staging" && (
+      {(shown === "staging" || shown === "review") && (
         <>
+          <p className="dp-note">
+            {shown === "staging"
+              ? autoApproved
+                ? "Approve a demo to prepare recipients and draft emails. Driftwood reviews outreach under your workspace review settings."
+                : "Approve a demo to prepare recipients and draft emails. You review each email before it is queued."
+              : "Check each recipient and the complete email. Approving an email adds it to Queue for the next available sending slot."}
+          </p>
           <div className="dp-bar is-bare">
             <div>
               {stagingMore ? (
@@ -1116,7 +1128,7 @@ export default function DemosPage() {
                 )
               )}
             </div>
-            {approveAllCount > 1 && (
+            {shown === "staging" && approveAllCount > 1 && (
               <div className="dp-bar-actions">
                 <button
                   type="button"
@@ -1134,8 +1146,8 @@ export default function DemosPage() {
                   {busy.has("all")
                     ? "Approving"
                     : isArmed({ kind: "approve-all" })
-                      ? `Approve all ${approveAllCount.toLocaleString()}? Confirm`
-                      : "Approve all"}
+                      ? `Approve ${approveAllCount.toLocaleString()} demos? Confirm`
+                      : "Approve all demos"}
                 </button>
               </div>
             )}
@@ -1147,57 +1159,54 @@ export default function DemosPage() {
           )}
           {staging.status === "loading" && library.status === "loading" ? (
             <CardSkeletons />
-          ) : stagedDemos.length === 0 && stagingFailed ? (
+          ) : (shown === "review" ? decidable.length : libraryCards.length + approvedRows.length) === 0 && stagingFailed ? (
             /* One source failing with the other empty leaves nothing to
                paint, and "nothing waiting for you" would be a lie about a
                read that did not land. */
             <ErrorState message={LOAD_FAILED} onRetry={retryStaging} />
-          ) : stagedDemos.length === 0 ? (
+          ) : (shown === "review" ? decidable.length : libraryCards.length + approvedRows.length) === 0 ? (
             <div className="dp-empty">
-              <p>{EMPTY_STAGING}</p>
+              <p>{shown === "review" ? "No emails waiting for your review. Approved demos appear here once recipients and drafts are ready." : EMPTY_STAGING}</p>
               <button type="button" className="dp-btn" onClick={() => switchSegment("queue")}>
                 See Queue
               </button>
             </div>
           ) : (
             <div className="dp-cards">
-              {stagedDemos.map((demo) => (
-                <DemoCard
-                  key={demo.key}
-                  demo={demo}
-                  busy={busy.has(demo.key)}
-                  pinnable={pinnable || pinned.has(demo.key)}
-                  pinned={pinned.has(demo.key)}
-                  armedSkip={isArmed({ kind: "skip", key: demo.key })}
-                  change={changeOpen === demo.key ? (drafts[demo.key] ?? "") : null}
-                  error={cardError?.key === demo.key ? cardError.message : null}
-                  approvable={isApprovable(demo)}
-                  onApprove={() =>
-                    demo.library
-                      ? void approveCard(demo)
-                      : void submitDecision(demo, "approve", undefined, "Approved.")
-                  }
-                  onSkip={() =>
-                    armOrRun({ kind: "skip", key: demo.key }, () =>
-                      void submitDecision(demo, "deny", "Skipped in Staging", "Skipped."),
-                    )
-                  }
-                  onOpenChange={() =>
-                    setChangeOpen((prev) => (prev === demo.key ? null : demo.key))
-                  }
-                  onChangeText={(text) =>
-                    setDrafts((prev) => ({ ...prev, [demo.key]: text }))
-                  }
-                  onSendChange={() => {
-                    const text = (drafts[demo.key] ?? "").trim();
-                    if (!text) return;
-                    if (demo.library) void sendLibraryChange(demo, text);
-                    else void submitDecision(demo, "deny", text, "Change sent.");
-                  }}
-                  onPin={() => void togglePin(demo)}
-                />
-              ))}
+              {shown === "review" ? emailGroups.map((group) => (
+                <section className="dp-email-group" key={group.key} aria-label={`${group.company} email review`}>
+                  <h2 className="dp-group-heading">{group.company} <span>{group.emails.length} {group.emails.length === 1 ? "email" : "emails"} to review</span></h2>
+                  {group.emails.map(renderCard)}
+                  {group.emails.length > 1 && (
+                    <div className="dp-group-approve">
+                      <button
+                        type="button"
+                        className={`dp-btn ${isArmed({ kind: "approve-group", key: group.key }) ? "is-armed" : "is-primary"}`}
+                        disabled={Boolean(emailGroupDisabledReason(group))}
+                        title={emailGroupDisabledReason(group) ?? "Queues only the complete emails shown above for this company"}
+                        onClick={() => armOrRun({ kind: "approve-group", key: group.key }, () => void approveEmailGroup(group))}
+                      >
+                        {busy.has(`email-group:${group.key}`) ? "Queuing emails" : isArmed({ kind: "approve-group", key: group.key }) ? `Queue ${group.emails.length} emails? Confirm` : `Approve ${group.emails.length} emails & queue`}
+                      </button>
+                      {cardError?.key === `email-group:${group.key}` && <p className="dp-error" role="alert">{cardError.message}</p>}
+                    </div>
+                  )}
+                </section>
+              )) : libraryCards.map(renderCard)}
             </div>
+          )}
+          {shown === "staging" && approvedRows.length > 0 && (
+            <ApprovedGroup
+              rows={approvedRows}
+              customerReviews={!autoApproved}
+              busy={busy}
+              rowError={rowError}
+              openName={hintOpen}
+              names={hints}
+              onOpenName={(key) => setHintOpen((prev) => (prev === key ? null : key))}
+              onNameText={(key, text) => setHints((prev) => ({ ...prev, [key]: text }))}
+              onAddName={(row) => void addName(row)}
+            />
           )}
         </>
       )}
@@ -1295,21 +1304,6 @@ export default function DemosPage() {
               )}
             </div>
           )}
-          {/* Approved, and nobody to send it to yet. It sits above the days
-              because it has no day of its own, and it leaves for one as soon
-              as its sends exist. */}
-          {approvedRows.length > 0 && (
-            <ApprovedGroup
-              rows={approvedRows}
-              busy={busy}
-              rowError={rowError}
-              openName={hintOpen}
-              names={hints}
-              onOpenName={(key) => setHintOpen((prev) => (prev === key ? null : key))}
-              onNameText={(key, text) => setHints((prev) => ({ ...prev, [key]: text }))}
-              onAddName={(row) => void addName(row)}
-            />
-          )}
           {queue.status === "loading" ? (
             <RowSkeletons />
           ) : queue.status === "error" ? (
@@ -1321,7 +1315,7 @@ export default function DemosPage() {
               }}
             />
           ) : rows.length === 0 ? (
-            approvedRows.length === 0 && (
+            (
               <div className="dp-empty">
                 <p>{EMPTY_QUEUE}</p>
                 <button type="button" className="dp-btn" onClick={() => switchSegment("staging")}>
@@ -1567,12 +1561,12 @@ function DemoCard({
             {/* The whole email, always. It is the content; everything else on
                 this card is chrome. The subject is bold text, not a labelled
                 row, and the body carries no box of its own. */}
+            <p className="dp-recipient"><span>To</span> {lead?.name || "Recipient"}{lead?.email ? ` <${lead.email}>` : " · Email address unavailable"}</p>
             {demo.subject && <p className="dp-subject">{demo.subject}</p>}
             <div className="dp-email">
               <EmailPreview
                 subject={null}
                 body={demo.body}
-                emphasize={emailCollapsed(demo.body).personal}
               />
             </div>
           </div>
@@ -1582,19 +1576,17 @@ function DemoCard({
       {(demo.canDecide || demo.library !== null) && (
         <>
           <div className="dp-actions">
-            {/* Approve says "this one is good, send it to the right people at
-                this company", whether or not an email is written for it yet.
-                Skip and Pin each name a review item, so a demo with no email
-                does not carry them. */}
+            {/* A demo approval prepares outreach; an email approval queues
+                only the exact recipient and copy on this card. */}
             {(demo.canDecide || approvable) && (
               <button
                 type="button"
                 className="dp-btn is-primary"
                 onClick={onApprove}
-                disabled={busy}
-                title={busy ? "Working on this demo now" : undefined}
+                disabled={busy || (!demo.library && !lead?.email)}
+                title={busy ? "Working on this demo now" : !demo.library && !lead?.email ? "A recipient email address is required before queuing" : undefined}
               >
-                {busy ? "Working" : "Approve"}
+                {busy ? "Working" : demo.library ? "Approve demo" : "Approve email & queue"}
               </button>
             )}
             <button
@@ -1820,12 +1812,13 @@ function DemoVideo({
 
 /* ---------- approved, and nobody to send it to yet ---------- */
 
-/* The group above the queue's days. Every row is a demo the customer
+/* The progress group in Staging. Every row is a demo the customer
    approved, with the company it was made for and the day they approved it.
    A row nobody was found for carries one line and one thing to do about it:
    a name, which goes back through the same approve call. */
 function ApprovedGroup({
   rows,
+  customerReviews,
   busy,
   rowError,
   openName,
@@ -1835,6 +1828,7 @@ function ApprovedGroup({
   onAddName,
 }: {
   rows: ApprovedRow[];
+  customerReviews: boolean;
   busy: ReadonlySet<string>;
   rowError: { id: string; message: string } | null;
   openName: string | null;
@@ -1849,6 +1843,7 @@ function ApprovedGroup({
         <h2 className="dp-day-name">{APPROVED_GROUP}</h2>
         <span className="dp-day-load">{rows.length.toLocaleString()}</span>
       </div>
+      <p className="dp-note">{customerReviews ? "Emails will appear in Review emails. Nothing is queued until you approve the copy." : "Driftwood reviews recipients and emails under your workspace review settings before they are queued."}</p>
       <div className="dp-tablewrap">
         <table className="dp-table">
           <colgroup>
@@ -1869,6 +1864,7 @@ function ApprovedGroup({
               return (
                 <tr key={row.demoKey}>
                   <td>
+                    <strong className="dp-progress-company">{row.company}</strong>
                     {row.nobodyLine ? (
                       <>
                         <span className="dp-nobody">{row.nobodyLine}</span>{" "}
@@ -1884,7 +1880,7 @@ function ApprovedGroup({
                         </button>
                       </>
                     ) : (
-                      row.company
+                      <span className="dp-muted">Preparing recipients and draft emails</span>
                     )}
                     {open && (
                       <div className="dp-name">

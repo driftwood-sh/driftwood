@@ -14,6 +14,7 @@ export type LeadContext = {
   lead_id: string;
   name: string | null;
   title: string | null;
+  email?: string | null;
   company: string | null;
   linkedin_url: string | null;
   stage: string;
@@ -22,6 +23,7 @@ export type LeadContext = {
 };
 
 export type BugEvidence = {
+  demo_key?: string;
   repro_steps?: string[];
   url?: string;
   device?: string;
@@ -192,8 +194,8 @@ export function readApprovalStatus(value: unknown): ApprovalStatus {
 /* "none" — nobody approved it, so the card offers Approve.
    "waiting" — approved, and nobody to send it to yet.
    "nobody" — approved, and nobody was found.
-   "filed" — the sends are written, so the demo belongs to a real day of the
-   queue rather than the group above them. */
+   "filed" — recipients and drafts are ready; the review items carry the
+   next customer decision before any email is queued. */
 export type ApprovalState = "none" | "waiting" | "nobody" | "filed";
 
 export function approvalState(
@@ -241,7 +243,7 @@ export function libraryHeading(row: LibraryDemo): string {
 
 /* A library demo as a Staging card. It has a clip, whoever it was made for,
    its age, and the idea behind it. It has no email yet, and no review item,
-   so nothing on it can be approved. */
+   so approving it authorizes discovery and drafting only. */
 export function stagedFromLibrary(row: LibraryDemo): StagedDemo {
   return {
     key: `library:${row.demo_id}`,
@@ -384,21 +386,20 @@ export function stagedWithLibrary(
 ): StagedDemo[] {
   const leads = new Set<string>();
   const slugs = new Set<string>();
+  const demoKeys = new Set<string>();
   for (const demo of staged) {
     if (demo.lead) leads.add(demo.lead.lead_id);
     if (demo.videoSlug) slugs.add(demo.videoSlug);
+    if (demo.evidence?.demo_key) demoKeys.add(demo.evidence.demo_key);
   }
   /* A demo already on its way out is not waiting on anyone. */
   for (const send of queued) {
     if (send.lead) leads.add(send.lead.lead_id);
     if (send.attachment_slug) slugs.add(send.attachment_slug);
   }
-  const rest = latestPerCompany(
-    library.filter(
-      (row) => !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name),
-    ),
-  )
-    .filter((row) => !awaitsPeople(row))
+  const rest = latestPerCompany(library)
+    .filter((row) => !demoKeys.has(row.demo_id) && !(row.lead_id !== null && leads.has(row.lead_id)) && !slugs.has(row.name))
+    .filter((row) => approvalState(row) === "none")
     .map(stagedFromLibrary);
   return [...staged, ...rest].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -436,7 +437,15 @@ export function groupStagedDemos(items: ReviewItem[]): StagedDemo[] {
     else groups.set(key, [item]);
   }
   const demos: StagedDemo[] = [];
-  for (const [key, group] of groups) {
+  const cards = [...groups].flatMap(([key, group]): [string, ReviewItem[]][] => {
+    const emails = group.filter((item) => item.kind === "send_email");
+    if (emails.length < 2) return [[key, group]];
+    // A decision must never approve a second email whose copy was hidden.
+    const context = group.filter((item) => item.kind !== "send_email")
+      .map((item) => ({ ...item, can_decide: false }));
+    return emails.map((email) => [`${key}:email:${email.id}`, [...context, email]]);
+  });
+  for (const [key, group] of cards) {
     const sorted = [...group].sort((a, b) =>
       a.created_at.localeCompare(b.created_at),
     );
@@ -457,7 +466,7 @@ export function groupStagedDemos(items: ReviewItem[]): StagedDemo[] {
       body: email?.body ?? null,
       videoSlug:
         (bug ? demoSlug(bug) : null) ?? (email ? demoSlug(email) : null),
-      evidence: bug?.evidence ?? null,
+      evidence: { ...bug?.evidence, ...email?.evidence },
       claim: bug?.body ?? null,
       pinId: (bug ?? sorted[0]).id,
       videoUrl: null,
@@ -487,6 +496,20 @@ export function decisionsFor(
    off their page: the quality gate is ours and stays internal. */
 export function readyForYou(demos: StagedDemo[]): StagedDemo[] {
   return demos.filter((demo) => demo.canDecide);
+}
+
+
+/* One company at a time. A company batch contains only these visible emails. */
+export function groupEmailReviews(demos: StagedDemo[]): { key: string; company: string; emails: StagedDemo[] }[] {
+  const groups = new Map<string, { key: string; company: string; emails: StagedDemo[] }>();
+  for (const demo of demos) {
+    const company = demo.lead?.company?.trim() || demo.heading;
+    const key = demo.evidence?.demo_key || company.toLowerCase();
+    const group = groups.get(key) ?? { key, company, emails: [] };
+    group.emails.push(demo);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
 
 /* ---------- Queue ---------- */
@@ -833,8 +856,8 @@ export function nobodyFoundLine(row: LibraryDemo): string {
   return note ? note : `No one found at ${row.company_name}.`;
 }
 
-/* The group above the queue's days, in the customer's own words. */
-export const APPROVED_GROUP = "Approved, not scheduled yet";
+/* Discovery stays in Staging until email drafts are ready for review. */
+export const APPROVED_GROUP = "Preparing recipients and emails";
 
 /* That group's rows: every demo the customer approved that has nobody to send
    it to yet, newest approval first. A demo leaves the group once its sends
@@ -844,7 +867,7 @@ export const APPROVED_GROUP = "Approved, not scheduled yet";
    holds one company twice would otherwise name it twice here, which is the
    bug latestPerCompany() exists to close, moved into this group. */
 export function approvedNotScheduled(library: LibraryDemo[]): ApprovedRow[] {
-  return latestPerCompany(library.filter(awaitsPeople))
+  return latestPerCompany(library).filter(awaitsPeople)
     .map((row) => ({
       demoKey: row.demo_id,
       company: row.company_name,

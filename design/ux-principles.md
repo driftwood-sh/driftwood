@@ -119,3 +119,37 @@ here in the same commit. Testable rules only; taste lives in the other file.
   the mock can't express a state (error, empty, slow), extend the mock in
   the same commit.
 - Re-shoot baked assets when dashboard styling changes (design-language.md §7).
+
+
+## Demo and email approvals
+
+- Demos use four stages: **Staging**, **Review emails**, **Queue**, **Sent**.
+  Staging contains demos awaiting approval and approved demos whose recipients
+  and drafts are being prepared. Queue counts only scheduled sends.
+- **Approve demo** authorizes recipient discovery and drafting. **Approve all
+  demos** has the same limited scope, with the existing two-press confirmation.
+  It must never also approve pending email reviews.
+- **Review emails** groups drafts by company and shows the recipient name,
+  title, email address, subject, full copy, and the linked preview image.
+  **Approve email & queue** acts on that displayed email only. After all of a
+  company’s full drafts, **Approve N emails & queue** requires confirmation and
+  acts only on that company’s displayed, reviewable emails. Multiple drafts
+  for one recipient remain separate; unseen copy cannot ride along in a decision.
+- A missing recipient email disables queueing with an explanation. Asking for
+  changes and skipping a recipient remain available. Review settings determine
+  the authorized reviewer; the page does not bypass that policy.
+- Contact progress refreshes while the page is visible and when the user
+  returns. Blocked discovery keeps its reason and the Add a name action.
+- Offline QA: `?mock=photon-review` has five reviewable emails for one company,
+  another demo awaiting approval, and a discovery in progress. All addresses
+  are fixtures at example.test. `scripts/demos-approve-qa.mjs` proves that demo
+  approvals queue no email and a later email approval queues exactly that copy,
+  plus company approval excludes drafts for other companies. It runs on
+  desktop Chromium and iPhone WebKit. Existing marketing dashboard assets
+  do not capture this page; no baked marketing asset changes are needed.
+
+- Existing portrait players reserve a 16:9 frame before metadata supplies the
+  actual ratio. Separating Staging from email review brings this single resize
+  into the viewport; clip QA now measures it honestly, requiring the same exact
+  ratio, one resize, and incremental CLS below 0.05. Changing the renderer or
+  adding dimensions to the media API is outside this approval-flow change.

@@ -16,6 +16,7 @@ import {
   readApprovalStatus,
   groupSentByDay,
   groupStagedDemos,
+  groupEmailReviews,
   isHeld,
   parseDateOnly,
   plannedTime,
@@ -629,7 +630,7 @@ test("a demo made for a named person keeps its own card", () => {
   ]);
 });
 
-test("a company whose newest demo is already queued still shows the one that is not", () => {
+test("a company whose newest demo is queued does not revive an older version", () => {
   const demos = stagedWithLibrary(
     [],
     [
@@ -649,7 +650,7 @@ test("a company whose newest demo is already queued still shows the one that is 
   );
   assert.deepEqual(
     demos.map((demo) => demo.key),
-    ["library:staged"],
+    [],
   );
 });
 
@@ -688,7 +689,7 @@ test("a status this build has never heard of still means approved", () => {
   assert.equal(readApprovalStatus("handed_to_agent"), "handed_to_agent");
 });
 
-test("an approved demo leaves Staging, and one whose sends are filed does not", () => {
+test("approved demos never return as unapproved library cards", () => {
   /* One company per row: one company is one card now, so rows that have to
      stay separate cards have to be separate companies. */
   const approved = (status: ApprovalStatus, id: string) =>
@@ -712,7 +713,7 @@ test("an approved demo leaves Staging, and one whose sends are filed does not", 
   );
   assert.deepEqual(
     demos.map((demo) => demo.key).sort(),
-    ["library:filed", "library:fresh"],
+    ["library:fresh"],
   );
 });
 
@@ -900,4 +901,42 @@ test("Approve all names one demo per company, so no company is approved twice", 
     [],
   );
   assert.deepEqual(approvableDemos(demos).map(approveKeyOf), ["airbnb-lead", "omio"]);
+});
+
+
+test("separate emails to one recipient never approve hidden copy", () => {
+  const cards = groupStagedDemos([
+    item({ id: "bug", kind: "bug_validation", can_decide: false }),
+    item({ id: "first", body: "First exact copy" }),
+    item({ id: "second", body: "Second exact copy" }),
+  ]);
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards.map((card) => card.body), ["First exact copy", "Second exact copy"]);
+  assert.deepEqual(cards.map((card) => decisionsFor(card, "approve")), [
+    [{ item_id: "first", decision: "approve" }],
+    [{ item_id: "second", decision: "approve" }],
+  ]);
+});
+
+test("company reviews retain all recipients and the approved demo identity", () => {
+  const cards = groupStagedDemos([
+    item({ id: "first", evidence: { demo_key: "html:company" }, lead: { ...lead("one", "Dana", "Meridian"), email: "dana@example.test" } }),
+    item({ id: "second", evidence: { demo_key: "html:company" }, lead: { ...lead("two", "Sam", "Meridian"), email: "sam@example.test" } }),
+  ]);
+  const groups = groupEmailReviews(cards);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].emails.length, 2);
+  assert.equal(groups[0].emails[1].lead?.email, "sam@example.test");
+  const merged = stagedWithLibrary(cards, [libraryRow({ demo_id: "html:company", lead_id: null, name: "Private run name" })], []);
+  assert.equal(merged.length, 2, "a private library row does not reappear beside its emails");
+});
+
+
+test("reviewing the newest company demo does not resurrect an older version", () => {
+  const cards = groupStagedDemos([item({ evidence: { demo_key: "html:new" } })]);
+  const rows = [
+    libraryRow({ demo_id: "html:old", lead_id: null, lead_name: null, company_name: "Meridian (meridian.test)", created_at: "2026-09-10T10:00:00Z" }),
+    libraryRow({ demo_id: "html:new", lead_id: null, lead_name: null, company_name: "Meridian (meridian.test)", created_at: "2026-09-12T10:00:00Z" }),
+  ];
+  assert.deepEqual(stagedWithLibrary(cards, rows, []).map((card) => card.library), [null]);
 });

@@ -327,6 +327,7 @@ if (mockMode) {
   };
   const lead = (name: string, title: string, company: string) => ({
     lead_id: name, name, title, company,
+    email: `${name.toLowerCase().replace(/\s+/g, ".")}@example.test`,
     linkedin_url: `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, "-")}`,
     stage: "new", prior_sends: 0, last_sent_at: null,
   });
@@ -393,6 +394,13 @@ if (mockMode) {
     due_at: hoursAgo(76), projected_date: null, created_at: hoursAgo(77),
     sent_at: hoursAgo(73),
   });
+  type MockReview = {
+    id: string; batch_id: string; agent_id: string; kind: string; title: string;
+    body: string; subject?: string | null; lead: ReturnType<typeof lead>;
+    attachment_slug: string | null; evidence: Record<string, unknown> | null;
+    status: string; decision_reason: string | null; decided_at: string | null;
+    scheduled_batch_id: string | null; created_at: string;
+  };
   const reviews = {
     counts: {
       pending: 8,
@@ -508,7 +516,7 @@ if (mockMode) {
         decision_reason: null, decided_at: null, scheduled_batch_id: null,
         created_at: hoursAgo(1.4),
       },
-    ],
+    ] as MockReview[],
     decided: [], total_pending: 8, limit: 25, offset: 0,
     queue_stats: [
       { kind: "connection_request", queued: 2, sent_24h: 3, cap: 20, runs_through: dateAhead(2), failed: 2 },
@@ -2838,10 +2846,41 @@ if (mockMode) {
     { demo_id: "photon-approved-bloom", lead_id: null, lead_name: null, company_name: "Bloom", description: "The second address line checkout loses.", artifact_id: "photon-approved-artifact-3", name: "photon-approved-bloom", content_type: "video/mp4", content_url: "/case-oruk.mp4", created_at: hoursAgo(340), updated_at: hoursAgo(339), approval: { status: "no_contacts_found", approved_at: hoursAgo(26), note: null } },
     { demo_id: "photon-approved-kestrel", lead_id: null, lead_name: null, company_name: "Kestrel", description: "The filter the dashboard forgets.", artifact_id: "photon-approved-artifact-4", name: "photon-approved-kestrel", content_type: "video/mp4", content_url: "/case-autosana.mp4", created_at: hoursAgo(360), updated_at: hoursAgo(359), approval: { status: "blocked", approved_at: hoursAgo(50), note: "Kestrel is on your blocklist." } },
   ];
+  /* A full company review, plus another demo still waiting for its first
+     approval. All names and addresses here are offline fixtures. */
+  const photonReviewRows: LibraryRow[] = [
+    { ...approvalRows[0], demo_id: "photon-review-new", company_name: "Sample account" },
+    { ...approvalRows[60], demo_id: "photon-review-meridian", name: "qa-photon-video", approval: { status: "contacts_found", approved_at: hoursAgo(2), note: null } },
+    { ...approvalRows[61] },
+  ];
+  if (mockMode === "photon-review" || mockMode === "photon-review-multi") {
+    const seed = reviews.pending.find((row) => row.id === "r4")!;
+    const evidence = { demo_key: "photon-review-meridian", repro_steps: [], video_timestamp: undefined, device: undefined, url: undefined };
+    reviews.pending = [
+      ["Dana Whitfield", "Founder"], ["Sam Okafor", "CTO"],
+      ["Priya Patel", "Head of Growth"], ["Riley Chen", "Head of Product"],
+      ["Jordan Reyes", "Partnerships"],
+    ].map(([name, title], index) => ({
+      ...seed, id: `photon-email-${index + 1}`, lead: lead(name, title, "Meridian"),
+      title: `Meridian · ${name} (email)`, subject: "Meridian, in iMessage",
+      body: `Hey ${name.split(" ")[0]},\n\nI made a short concept demo of Meridian's booking experience in iMessage: choosing a time, confirming the details, and checking out with Apple Pay.\n\n[![Meridian demo preview](https://driftwood.sh/compare.gif)](https://driftwood.sh/demo-portrait.mp4)\n\nCould this fit what you're building? Happy to walk you through it.\n\nDarshan\nPhoton`,
+      attachment_slug: clip("demo-portrait.mp4"), evidence,
+    }));
+    if (mockMode === "photon-review-multi") reviews.pending.push({
+      ...reviews.pending[0], id: "other-company-email", lead: lead("Owen Brooks", "Founder", "Juniper"),
+      body: "Hey Owen,\n\nI made a concept demo for Juniper.\n\nDarshan\nPhoton", evidence: { ...evidence, demo_key: "photon-review-juniper" },
+    });
+    sends.sends = [];
+    sends.total = 0;
+    sends.counts.pending = 0;
+    reviews.counts.pending = reviews.pending.length;
+    reviews.counts.pending_sends = 5;
+    reviews.counts.pending_system = 0;
+  }
   /* The library the reads and the approve writes both act on, so a demo the
      customer approves is still approved after a segment switch. */
   const activeLibrary = (): LibraryRow[] =>
-    mockMode === "library-only"
+    (mockMode === "photon-review" || mockMode === "photon-review-multi") ? photonReviewRows : mockMode === "library-only"
       ? libraryOnlyRows
       : mockMode === "photon-shaped"
         ? photonRows

@@ -746,3 +746,19 @@
   .dp-btn { transition: none; }
   .dp-skel-pulse { animation: none; }
 }
+
+/* The two approvals share the established card layout; their stage is explicit. */
+.demos-page .dp-email-group { display: grid; gap: 1rem; }
+.demos-page .dp-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; margin: .5rem 0 0; font-size: 1rem; font-weight: 600; }
+.demos-page .dp-group-heading span { color: var(--color-ink-soft); font-size: .8125rem; font-weight: 400; }
+.demos-page .dp-recipient { margin: 0 0 .6rem; font-size: .875rem; overflow-wrap: anywhere; }
+.demos-page .dp-recipient > span { color: var(--color-ink-soft); margin-right: .35rem; }
+.demos-page .dp-progress-company { display: block; margin-bottom: .3rem; font-weight: 500; }
+
+@media (max-width: 480px) {
+  .demos-page .dp-segments { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
+  .demos-page .dp-segments button { padding-inline: .6rem; }
+}
+
+.demos-page .dp-email-group .email-preview-body img { max-width: min(100%, 240px); max-height: 360px; width: auto; height: auto; object-fit: contain; }
+.demos-page .dp-group-approve { padding: 0 0 1.5rem; }

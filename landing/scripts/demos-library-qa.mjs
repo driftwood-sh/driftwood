@@ -59,8 +59,8 @@ try {
  // Approve names the demo itself, so every card carries one and Approve all
  // covers the segment. Skip and Pin name a review item, which a demo with no
  // email does not have.
- assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),111);
- assert.equal(await page.getByRole('button',{name:'Approve all',exact:true}).count(),1);
+ assert.equal(await page.getByRole('button',{name:'Approve demo',exact:true}).count(),111);
+ assert.equal(await page.getByRole('button',{name:'Approve all demos',exact:true}).count(),1);
  for (const label of ['Skip','Pin']) {
   assert.equal(await page.getByRole('button',{name:label,exact:true}).count(),0,`${label} must not render`);
  }
@@ -91,12 +91,13 @@ try {
  const northstar=page.locator('.dp-card[aria-label*="Priya Patel"]');
  assert.equal(await northstar.count(),1);
  assert.equal(await northstar.locator('.dp-col-email').count(),1);
- assert.equal(await northstar.getByRole('button',{name:'Approve',exact:true}).count(),1);
+ assert.equal(await northstar.getByRole('button',{name:'Approve email & queue',exact:true}).count(),1);
  // The same page still carries the demos that have no email yet, and those
  // are approved too: one press says "send this to the right people there".
+ await page.getByRole('button',{name:/^Staging/}).click();
  const sample=page.locator('.dp-card[aria-label*="Sample company"]');
  assert.equal(await sample.count(),1);
- assert.equal(await sample.getByRole('button',{name:'Approve',exact:true}).count(),1);
+ assert.equal(await sample.getByRole('button',{name:'Approve demo',exact:true}).count(),1);
  assert.equal(await sample.getByRole('button',{name:'Ask for a change',exact:true}).count(),1);
  // And a change on one of those sends.
  await sample.getByRole('button',{name:'Ask for a change',exact:true}).click();

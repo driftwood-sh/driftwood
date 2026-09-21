@@ -1,190 +1,118 @@
-/* Approve, before anyone has been found to send the demo to.
-
-   The hole this proves is closed: a workspace with sixty demos and no email
-   on any of them had no way to say "send this one". Their cards offered only
-   Ask for a change, so the demos sat in Staging and nothing left it.
-
-   Four things have to hold:
-   - a card with no email carries Approve, and one press moves it;
-   - Approve all covers the whole segment, arms, and names the number;
-   - an approved demo with nobody to send it to yet is at the top of Queue,
-     with the company and the day it was approved;
-   - a demo nobody was found for carries one line and one thing to do about
-     it, and the name the customer types goes back through the same call.
-
-   Plus the state prod is in until the backend ships: every control renders,
-   and a 404 says so beside the control.
-
-   Run the dev server first: npm run dev -- --port 5191
-   Another port: DEMO_QA_BASE_URL=http://127.0.0.1:5193 node scripts/demos-approve-qa.mjs */
+/* Offline regression for the two separate customer approvals. Every write is
+   intercepted by ?mock; this script must never point at a production host. */
 import { chromium, webkit, devices } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
-const base=process.env.DEMO_QA_BASE_URL ?? 'http://127.0.0.1:5191';
-const shots='/private/tmp/driftwood-dashboard-review-shots';
-mkdirSync(shots,{recursive:true});
+const base = process.env.DEMO_QA_BASE_URL ?? 'http://127.0.0.1:5196';
+assert.ok(['127.0.0.1', 'localhost'].includes(new URL(base).hostname));
+const shots = process.env.DEMO_QA_SHOTS ?? '/private/tmp/photon-approval-ui-shots';
+mkdirSync(shots, { recursive: true });
 
-/* The fixture: sixty demos with no email, and four already approved — two
-   waiting for people, two nobody was found for. */
-const STAGED=60;
-const APPROVED=4;
-
-const browser=await chromium.launch({headless:true});
+async function instrument(page) {
+  await page.addInitScript(() => {
+    window.__writes = [];
+    let current = window.fetch;
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: next => {
+      current = (...args) => {
+        if (args[1]?.method === 'POST') window.__writes.push({ url: String(args[0]), body: args[1].body });
+        return next(...args);
+      };
+    }});
+  });
+  // Fixture preview is local media; the email still uses its real URL syntax.
+  await page.route('https://driftwood.sh/compare.gif', route => route.fulfill({ path: 'public/compare.gif', contentType: 'image/gif' }));
+  await page.route('https://driftwood.sh/demo-portrait.mp4', route => route.fulfill({ path: 'public/demo-portrait.mp4', contentType: 'video/mp4' }));
+}
+const browser = await chromium.launch({ headless: true });
 try {
- const page=await browser.newPage({viewport:{width:1440,height:1100}});
- const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await instrument(page);
 
- // ---- one demo, one press ----
- await page.goto(`${base}/dashboard/demos?mock=demos-approval`);
- await page.locator('.dp-card').nth(STAGED-1).waitFor();
- assert.equal(await page.locator('.dp-card').count(),STAGED);
- // Every card offers it, because Approve names the demo and not a review item.
- assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),STAGED);
- // The demos already approved are not among them: they have left Staging.
- for (const company of ['Meridian','Ledgerline','Bloom','Kestrel'])
-  assert.equal(await page.locator(`.dp-card[aria-label="${company}"]`).count(),0,`${company} must have left Staging`);
- const airbnb=page.locator('.dp-card[aria-label="Airbnb"]');
- await airbnb.getByRole('button',{name:'Approve',exact:true}).click();
- await page.getByText('Approved.',{exact:true}).waitFor();
- assert.equal(await airbnb.count(),0,'an approved demo leaves Staging');
- assert.equal(await page.locator('.dp-card').count(),STAGED-1);
+  await page.goto(`${base}/dashboard/demos?mock=demos-approval`);
+  await page.locator('.dp-card').nth(59).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Approve demo', exact: true }).count(), 60);
+  assert.equal(await page.locator('.dp-approved tbody tr').count(), 4);
+  await page.getByRole('button', { name: 'Approve all demos', exact: true }).click();
+  const confirm = page.getByRole('button', { name: 'Approve 60 demos? Confirm', exact: true });
+  await confirm.click();
+  assert.equal(await page.locator('.dp-card').count(), 60, 'double click does not confirm');
+  await page.waitForTimeout(450);
+  await confirm.click();
+  await page.getByText('60 demos approved. Review recipients and emails when they are ready.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.dp-card').count(), 0);
+  assert.equal(await page.locator('.dp-approved tbody tr').count(), 64);
+  assert.equal((await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide')).length, 0);
+  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
+  await page.getByText('Nothing queued yet.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.dp-approved').count(), 0, 'discovery is never presented as queued mail');
+  await page.getByRole('button', { name: /^Staging/ }).click();
+  const bloom = page.locator('.dp-approved tbody tr').filter({ hasText: 'No one found at Bloom.' });
+  await bloom.getByRole('button', { name: 'Add a name' }).click();
+  await bloom.getByRole('textbox').fill('Ada Lovelace');
+  await bloom.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByText('Ada Lovelace added.', { exact: true }).waitFor();
+  await page.screenshot({ path: `${shots}/discovery-desktop.png` });
 
- // ---- the group at the top of Queue ----
- await page.getByRole('button',{name:/^Queue/}).click();
- const group=page.locator('section.dp-approved');
- await group.waitFor();
- await group.getByRole('heading',{name:'Approved, not scheduled yet'}).waitFor();
- const rows=group.locator('tbody tr');
- assert.equal(await rows.count(),APPROVED+1);
- // Newest approval first, with the company and the day they approved it.
- assert.deepEqual(await rows.first().locator('td').allInnerTexts(),['Airbnb','Today']);
- // Nothing queued in this workspace, so the group stands alone — and the
- // empty-queue line must not claim there is nothing here.
- assert.equal(await page.locator('.dp-day:not(.dp-approved)').count(),0);
- assert.equal(await page.locator('.dp-empty').count(),0);
- // The number over the tab counts the group, not only the days.
- await page.locator('.dp-segments button[aria-pressed="true"] .dp-count').getByText(String(APPROVED+1),{exact:true}).waitFor();
- await page.screenshot({path:`${shots}/demos-queue-approved-group.png`});
+  await page.goto(`${base}/dashboard/demos?mock=photon-review-multi`);
+  await page.locator('.dp-email-group .dp-card').nth(4).waitFor();
+  assert.equal(await page.locator('.dp-email-group').count(), 2);
+  await page.getByRole('heading', { name: 'Meridian 5 emails to review' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Approve all demos', exact: true }).count(), 0);
+  const dana = page.getByRole('article', { name: 'Dana Whitfield, Meridian', exact: true });
+  await dana.getByText('To Dana Whitfield <dana.whitfield@example.test>', { exact: true }).waitFor();
+  await dana.getByText('Meridian, in iMessage', { exact: true }).waitFor();
+  assert.equal(await dana.getByRole('img', { name: 'Meridian demo preview' }).locator('..').getAttribute('href'), 'https://driftwood.sh/demo-portrait.mp4');
+  await page.screenshot({ path: `${shots}/email-review-desktop.png` });
 
- // ---- nobody found: one line, one action ----
- // The backend's own note writes the line when it wrote one; otherwise the
- // line names the company.
- const bloom=rows.filter({hasText:'No one found at Bloom.'});
- assert.equal(await bloom.count(),1);
- assert.equal(await rows.filter({hasText:'Kestrel is on your blocklist.'}).count(),1);
- // Nothing on this surface describes our work, so no row narrates one.
- const groupText=await group.innerText();
- for (const word of ['enrich','Enrich','finding','contacts','looking'])
-  assert.equal(groupText.includes(word),false,`the group must not say "${word}"`);
- await bloom.getByRole('button',{name:'Add a name'}).click();
- await bloom.getByRole('textbox').fill('Ada Lovelace');
- await bloom.getByRole('button',{name:'Add',exact:true}).click();
- await page.getByText('Ada Lovelace added.',{exact:true}).waitFor();
- // A name means there is somebody to send it to, so the line is gone and the
- // row reads like the rest of the group.
- assert.equal(await rows.filter({hasText:'No one found at Bloom.'}).count(),0);
- assert.deepEqual(await rows.filter({hasText:'Bloom'}).locator('td').allInnerTexts(),['Bloom','Today']);
+  // A demo can be approved while reviewed emails exist, without approving them.
+  await page.getByRole('button', { name: /^Staging/ }).click();
+  await page.getByRole('button', { name: 'Approve demo', exact: true }).click();
+  await page.getByText('Demo approved. Recipients and emails will be prepared for your review.', { exact: true }).waitFor();
+  assert.equal((await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide')).length, 0);
+  await page.getByRole('button', { name: /^Review emails/ }).click();
+  assert.equal(await page.locator('.dp-email-group .dp-card').count(), 6);
+  await dana.getByRole('button', { name: 'Approve email & queue', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.dp-email-group .dp-card').length === 5);
+  const writes = (await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide'));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(writes[0].body), [{ item_id: 'photon-email-1', decision: 'approve' }]);
+  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
+  await page.getByText('Dana Whitfield', { exact: false }).waitFor();
+  assert.equal(await page.locator('.dp-table tbody tr').count(), 1);
+  await page.screenshot({ path: `${shots}/queued-desktop.png` });
+  // Company approval follows all four complete bodies and excludes Juniper.
+  await page.getByRole('button', { name: /^Review emails/ }).click();
+  const meridian = page.getByRole('region', { name: 'Meridian email review', exact: true });
+  assert.equal(await meridian.locator('.dp-card').count(), 4);
+  await meridian.getByRole('button', { name: 'Approve 4 emails & queue', exact: true }).click();
+  const batchConfirm = meridian.getByRole('button', { name: 'Queue 4 emails? Confirm', exact: true });
+  await batchConfirm.waitFor();
+  await page.waitForTimeout(450);
+  await batchConfirm.click();
+  await page.waitForFunction(() => document.querySelectorAll('.dp-email-group .dp-card').length === 1);
+  const batchWrites = (await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide'));
+  assert.deepEqual(JSON.parse(batchWrites[1].body).map(row => row.item_id).sort(), ['photon-email-2', 'photon-email-3', 'photon-email-4', 'photon-email-5']);
+  await page.getByRole('article', { name: 'Owen Brooks, Juniper', exact: true }).waitFor();
+  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
+  assert.equal(await page.locator('.dp-table tbody tr').count(), 5);
 
- // ---- Approve all, sixty of them, on a fresh page ----
- await page.goto(`${base}/dashboard/demos?mock=demos-approval`);
- await page.locator('.dp-card').nth(STAGED-1).waitFor();
- const all=page.getByRole('button',{name:'Approve all',exact:true});
- await all.click();
- // Arms first, and the confirm states the number, with no cap on it.
- const confirm=page.getByRole('button',{name:`Approve all ${STAGED}? Confirm`});
- await confirm.waitFor();
- // A press inside the guard window is a double click, not a decision.
- await confirm.click();
- assert.equal(await confirm.count(),1,'a press inside the guard window decides nothing');
- await page.waitForTimeout(500);
- await confirm.click();
- await page.getByText(`${STAGED} demos approved.`,{exact:true}).waitFor();
- await page.locator('.dp-empty').waitFor();
- assert.equal(await page.locator('.dp-card').count(),0);
- await page.getByRole('button',{name:/^Queue/}).click();
- await group.waitFor();
- assert.equal(await group.locator('tbody tr').count(),STAGED+APPROVED);
- await page.screenshot({path:`${shots}/demos-queue-approved-all.png`});
+  assert.deepEqual(errors, []);
+  console.log('Desktop: 60 demo approvals queue zero emails; discovery and contacts stay visible; five recipient copies with clickable preview; one email approval queues exactly one send; company approval queues only its four remaining reviewed emails.');
+} finally { await browser.close(); }
 
- // ---- against the library that holds one company twice ----
- // photon-shaped is the dedupe fixture: 71 rows for 60 companies, and its
- // private-run ids are real `html:<32 hex>` keys, so this is also where the
- // approve path proves it encodes a colon into the URL.
- // The mock answers inside the page, so no request leaves the browser and
- // page.on('request') would see nothing. Wrap whatever fetch the mock installs
- // and keep the approve urls it is asked for, the way demos-library-qa does.
- await page.addInitScript(()=>{
-  window.__approveUrls=[];
-  let current=window.fetch;
-  Object.defineProperty(window,'fetch',{configurable:true,get:()=>current,set:(next)=>{
-   current=(...args)=>{
-    const url=typeof args[0]==='string'?args[0]:args[0]?.url??'';
-    if (url.includes('/approve')) window.__approveUrls.push(url);
-    return next(...args);
-   };
-  }});
- });
- await page.goto(`${base}/dashboard/demos?mock=photon-shaped`);
- await page.locator('.dp-card').first().waitFor();
- const staging=page.locator('.dp-segments button[aria-pressed="true"]');
- await staging.locator('.dp-count').waitFor();
- const labels=await page.locator('.dp-card').evaluateAll((nodes)=>nodes.map((node)=>node.getAttribute('aria-label')));
- const company=(label)=>label.toLowerCase().replace(/\s*\([^()]+\)$/,'').trim();
- // One card per company, and Approve on every one: the two behaviours hold
- // together, and the count over the tab is still the number of companies.
- assert.equal(labels.length,60,'one card per company');
- assert.equal(new Set(labels.map(company)).size,60,'no company twice');
- assert.equal(await staging.locator('.dp-count').innerText(),'60');
- assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),60);
- // A private-run card, whose demo id carries a colon.
- const run=page.locator('.dp-card[aria-label="Agoda (agoda.com)"]');
- await run.getByRole('button',{name:'Approve',exact:true}).click();
- await page.getByText('Approved.',{exact:true}).waitFor();
- assert.equal(await run.count(),0,'the approved company leaves Staging');
- assert.equal(labels.length-1,await page.locator('.dp-card').count());
- const sent=await page.evaluate(()=>window.__approveUrls);
- assert.equal(sent.length,1);
- assert.match(sent[0],/%3A/,'a colon in the demo id is encoded, never sent raw');
- // It is in the group, named once, with the company the card carried.
- await page.getByRole('button',{name:/^Queue/}).click();
- await group.waitFor();
- const named=await group.locator('tbody tr td:first-child').allInnerTexts();
- assert.deepEqual(named,['Agoda (agoda.com)']);
-
- // ---- until the backend ships ----
- // Every control renders, and a 404 says so beside the control that was
- // pressed rather than as a failure the customer cannot act on.
- await page.goto(`${base}/dashboard/demos?mock=demos-approve-missing`);
- await page.locator('.dp-card').first().waitFor();
- const missing=page.locator('.dp-card[aria-label="Airbnb"]');
- assert.equal(await missing.getByRole('button',{name:'Approve',exact:true}).count(),1);
- await missing.getByRole('button',{name:'Approve',exact:true}).click();
- await missing.locator('.dp-error').getByText('Not available yet.',{exact:true}).waitFor();
- // The demo stays where it is: nothing was approved.
- assert.equal(await missing.count(),1);
- const allMissing=page.getByRole('button',{name:'Approve all',exact:true});
- await allMissing.click();
- await page.waitForTimeout(500);
- await page.getByRole('button',{name:`Approve all ${STAGED}? Confirm`}).click();
- await page.locator('.dp-error').getByText('Not available yet.',{exact:true}).first().waitFor();
- assert.equal(await page.locator('.dp-card').count(),STAGED);
-
- assert.deepEqual(errors,[]);
- console.log('Desktop Chromium: Approve on a demo with no email, Approve all of 60 armed and confirmed, the Queue group, the nobody-found line and its name, and the 404 line.');
-} finally {await browser.close();}
-
-const mobile=await webkit.launch({headless:true});
+const mobile = await webkit.launch({ headless: true });
 try {
- const page=await mobile.newPage({...devices['iPhone 13']});
- const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(`${base}/dashboard/demos?seg=queue&mock=demos-approval`);
- const group=page.locator('section.dp-approved');
- await group.waitFor();
- assert.equal(await group.locator('tbody tr').count(),APPROVED);
- await group.getByRole('button',{name:'Add a name'}).first().click();
- await group.getByRole('textbox').first().waitFor();
- assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
- await page.screenshot({path:`${shots}/demos-queue-approved-group-mobile.png`});
- assert.deepEqual(errors,[]);
- console.log('iPhone WebKit: the group and its name field fit, and the page does not scroll sideways.');
-} finally {await mobile.close();}
+  const page = await mobile.newPage({ ...devices['iPhone 13'] });
+  await instrument(page);
+  await page.goto(`${base}/dashboard/demos?mock=photon-review&seg=review`);
+  await page.locator('.dp-email-group .dp-card').nth(4).waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.screenshot({ path: `${shots}/email-review-mobile.png` });
+  await page.getByRole('button', { name: /^Staging/ }).click();
+  await page.locator('.dp-approved').waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.screenshot({ path: `${shots}/discovery-mobile.png` });
+  console.log('iPhone WebKit: all four tabs, recipient address, email preview, and discovery fit without horizontal page overflow.');
+} finally { await mobile.close(); }
