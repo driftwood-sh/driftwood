@@ -13,6 +13,10 @@
       "destination": "https://driftwood-backend-767736087356.us-central1.run.app/d/:slug*"
     },
     {
+      "source": "/t/:path*",
+      "destination": "https://driftwood-backend-767736087356.us-central1.run.app/t/:path*"
+    },
+    {
       "source": "/auth/:path*",
       "destination": "https://driftwood-backend-767736087356.us-central1.run.app/auth/:path*"
     },
@@ -100,7 +104,7 @@
       ]
     },
     {
-      "source": "/((?!d/|api/|auth/|health|linkedin/|email/|twitter/|mailboxes/|mcp/|triage|triage/|_vercel/).*)",
+      "source": "/((?!d/|t/|api/|auth/|health|linkedin/|email/|twitter/|mailboxes/|mcp/|triage|triage/|_vercel/).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mapChannelAnalytics } from "./api.ts";
-import { analyticsDataAfterFailure, appendAnalyticsPage, analyticsWindow, channelLabel, countAutomatic, filterByReplyKind, formatMetric, formatReplyBody, type MetricPerson } from "./model.ts";
+import { AVAILABLE_STATUSES, analyticsDataAfterFailure, appendAnalyticsPage, analyticsWindow, channelLabel, countAutomatic, filterByReplyKind, formatMetric, formatReplyBody, statusLabel, type MetricPerson } from "./model.ts";
 
 const person = (overrides: Partial<MetricPerson>): MetricPerson => ({
   leadId: "lead-1",
@@ -135,4 +135,49 @@ test("filterByReplyKind splits people from machines and counts them", () => {
   assert.deepEqual(filterByReplyKind(rows, "human"), [human]);
   assert.deepEqual(filterByReplyKind(rows, "automatic"), [ooo]);
   assert.equal(countAutomatic(rows), 1);
+});
+
+test("the watched cell rides the channel row and tolerates an older backend", () => {
+  const mapped = mapChannelAnalytics({
+    window: { start: "2026-09-01T00:00:00Z", end: "2026-09-20T00:00:00Z" },
+    channels: [{
+      channel: "email",
+      contacted: { count: 9, available: true },
+      opened: { count: 6, available: true },
+      clicked: { count: 3, available: true },
+      watched: { count: 2, available: true },
+      replied: { count: 1, available: true },
+      demos_booked: { count: 0, available: true },
+    }, {
+      // LinkedIn has no player page, so the backend omits the cell.
+      channel: "linkedin",
+      contacted: { count: 4, available: true },
+      opened: { count: null, available: false },
+      clicked: { count: null, available: false },
+      replied: { count: 2, available: true },
+      demos_booked: { count: 1, available: true },
+    }],
+    definitions: [], people: [],
+    people_status: "watched", people_channel: "email", people_total: 0, limit: 100, offset: 0,
+    unmatched_replies: { linkedin: 0, email: 0, x: 0 }, unattributed_demos_booked: 0,
+  });
+
+  assert.deepEqual(mapped.channels[0].watched, { count: 2, available: true });
+  assert.equal(formatMetric(mapped.channels[0].watched), "2");
+  assert.deepEqual(mapped.channels[1].watched, { count: null, available: false });
+  assert.equal(formatMetric(mapped.channels[1].watched), "\u2014");
+  assert.equal(mapped.peopleStatus, "watched");
+});
+
+test("the drilldown offers every tracked outcome, watched among them", () => {
+  assert.deepEqual(AVAILABLE_STATUSES, [
+    "contacted",
+    "opened",
+    "clicked",
+    "watched",
+    "replied",
+    "demos_booked",
+  ]);
+  assert.equal(statusLabel("watched"), "Watched");
+  assert.equal(statusLabel("demos_booked"), "Demos booked");
 });

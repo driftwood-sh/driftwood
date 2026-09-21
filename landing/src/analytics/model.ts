@@ -4,6 +4,7 @@ export type AnalyticsStatus =
   | "contacted"
   | "opened"
   | "clicked"
+  | "watched"
   | "replied"
   | "demos_booked";
 
@@ -17,6 +18,8 @@ export type ChannelMetric = {
   contacted: MetricValue;
   opened: MetricValue;
   clicked: MetricValue;
+  /* Leads whose best watch of the demo reached 50% or more. */
+  watched: MetricValue;
   replied: MetricValue;
   demosBooked: MetricValue;
 };
@@ -65,8 +68,14 @@ export type ChannelAnalytics = {
 
 export const CHANNELS: AnalyticsChannel[] = ["linkedin", "email", "x"];
 
+/* The drilldown's tabs, in funnel order. Opened, clicked and watched came
+   with the tracked demo GIF: the email carries the demo, and the player page
+   it links to reports the click and the watch. */
 export const AVAILABLE_STATUSES: AnalyticsStatus[] = [
   "contacted",
+  "opened",
+  "clicked",
+  "watched",
   "replied",
   "demos_booked",
 ];

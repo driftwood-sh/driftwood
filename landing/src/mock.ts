@@ -339,6 +339,10 @@ if (mockMode) {
       status: "sent", error: null, error_class: null,
       due_at: hoursAgo(30), projected_date: null, created_at: hoursAgo(31),
       sent_at: hoursAgo(28),
+      /* The demo GIF was fetched seconds after the send and nothing followed:
+         Apple Mail's prefetch looks exactly like this, so the ledger hedges. */
+      tracked: true, opened_at: hoursAgo(27.99), open_suspect: true,
+      clicked_at: null, watched_pct: null,
     },
     {
       id: "sl2", batch_id: "sb0", kind: "message",
@@ -369,6 +373,10 @@ if (mockMode) {
       status: "sent", error: null, error_class: null,
       due_at: hoursAgo(100), projected_date: null, created_at: hoursAgo(101),
       sent_at: hoursAgo(99),
+      /* The whole funnel: the player page confirmed the click and the watch,
+         so the open needs no hedge. */
+      tracked: true, opened_at: hoursAgo(96), open_suspect: false,
+      clicked_at: hoursAgo(95.8), watched_pct: 61,
     },
   ];
   /* Three demos, each the pair the agent files: a bug_validation item that
@@ -1570,6 +1578,12 @@ if (mockMode) {
     { lead_id: "lead-2", name: "Anika Shah", title: "Head of QA", email: "anika@example.test", company_name: "Northstar Health", channel: "linkedin", status: "replied", occurred_at: hoursAgo(9), source: "linkedin_reply", reply_text: "Interesting — how does this handle flaky device farms?" },
     { lead_id: "lead-4", name: "Ines Duarte", title: "Product lead", email: "ines@example.test", company_name: "Relayworks", channel: "email", status: "replied", occurred_at: hoursAgo(5), source: "email_reply", reply_subject: "Automatic reply: quick idea for Relayworks", reply_text: "I am out of the office until Monday, September 7, with limited access to email. For urgent matters contact ops@relayworks.test.", reply_is_automatic: true, reply_auto_reason: 'subject says "automatic reply"' },
     { lead_id: "lead-5", name: "Owen Brooks", title: "Engineering director", email: "owen@example.test", company_name: "Juniper Systems", channel: "email", status: "replied", occurred_at: hoursAgo(12), source: "email_reply", reply_subject: "Re: quick idea for Juniper", reply_text: "Owen is no longer with the company. Please direct product inquiries to engineering@juniper.test.", reply_is_automatic: true, reply_auto_reason: 'mentions "no longer with the company"' },
+    /* The demo funnel on email: two opens, one of which clicked through to
+       the player page and watched most of the video. The counts above match. */
+    { lead_id: "lead-1", name: "Mara Okafor", title: "VP Operations", email: "mara@example.test", company_name: "Ternary Labs", channel: "email", status: "opened", occurred_at: hoursAgo(27), source: "demo_open" },
+    { lead_id: "lead-3", name: "Luca Moretti", title: "Founder", email: "luca@example.test", company_name: "Clearline", channel: "email", status: "opened", occurred_at: hoursAgo(25), source: "demo_open" },
+    { lead_id: "lead-3", name: "Luca Moretti", title: "Founder", email: "luca@example.test", company_name: "Clearline", channel: "email", status: "clicked", occurred_at: hoursAgo(24.8), source: "demo_click" },
+    { lead_id: "lead-3", name: "Luca Moretti", title: "Founder", email: "luca@example.test", company_name: "Clearline", channel: "email", status: "watched", occurred_at: hoursAgo(24.7), source: "demo_watch" },
     { lead_id: "lead-3", name: "Luca Moretti", title: "Founder", email: "luca@example.test", company_name: "Clearline", channel: "email", status: "demos_booked", occurred_at: hoursAgo(26), source: "lead_stage" },
     /* These two carry the lead ids the delivered ledger uses, so the Demos
        page's Sent segment has a Replied badge to show on two of its rows. */
@@ -1584,14 +1598,17 @@ if (mockMode) {
     return {
       window: { start: query.get("start"), end: query.get("end") },
       channels: [
-        { channel: "linkedin", contacted: { count: 3, available: true }, opened: { count: null, available: false }, clicked: { count: null, available: false }, replied: { count: 2, available: true }, demos_booked: { count: 0, available: true } },
-        { channel: "email", contacted: { count: 2, available: true }, opened: { count: null, available: false }, clicked: { count: null, available: false }, replied: { count: 4, available: true }, demos_booked: { count: 1, available: true } },
-        { channel: "x", contacted: { count: 1, available: true }, opened: { count: null, available: false }, clicked: { count: null, available: false }, replied: { count: null, available: false }, demos_booked: { count: 0, available: true } },
+        // Only email carries the demo GIF and its player page, so only email
+        // can report an open, a click, or a watch.
+        { channel: "linkedin", contacted: { count: 3, available: true }, opened: { count: null, available: false }, clicked: { count: null, available: false }, watched: { count: null, available: false }, replied: { count: 2, available: true }, demos_booked: { count: 0, available: true } },
+        { channel: "email", contacted: { count: 2, available: true }, opened: { count: 2, available: true }, clicked: { count: 1, available: true }, watched: { count: 1, available: true }, replied: { count: 4, available: true }, demos_booked: { count: 1, available: true } },
+        { channel: "x", contacted: { count: 1, available: true }, opened: { count: null, available: false }, clicked: { count: null, available: false }, watched: { count: null, available: false }, replied: { count: null, available: false }, demos_booked: { count: 0, available: true } },
       ],
       definitions: [
         { id: "contacted", label: "Contacted", available: true, definition: "Distinct leads with a confirmed outbound send.", note: null },
-        { id: "opened", label: "Opened", available: false, definition: "Distinct leads with a provider open event.", note: "Provider open events are not stored yet." },
-        { id: "clicked", label: "Clicked", available: false, definition: "Distinct leads with a provider click event.", note: "Provider click events are not stored yet." },
+        { id: "opened", label: "Opened", available: true, definition: "Distinct leads who fetched the demo image in the email.", note: "Only emails that carry the demo report an open." },
+        { id: "clicked", label: "Clicked", available: true, definition: "Distinct leads who opened the demo player page.", note: "Only emails that carry the demo report a click." },
+        { id: "watched", label: "Watched", available: true, definition: "Distinct leads whose best watch reached half the demo.", note: "Only emails that carry the demo report a watch." },
         { id: "replied", label: "Replied", available: true, definition: "Distinct leads matched to an inbound reply.", note: null },
         { id: "demos_booked", label: "Demos booked", available: true, definition: "Distinct booked leads attributed to the latest prior send.", note: null },
       ],
@@ -1610,6 +1627,8 @@ if (mockMode) {
     email: string | null; linkedin_url: string; stage: string; origin: string;
     source: string; audiences: string[]; demo_idea: string | null;
     demo_artifact_id: string | null; created_at: string; updated_at: string;
+    /* Demo engagement, optional exactly as the real rows are. */
+    opened_at?: string | null; clicked_at?: string | null; watched_pct?: number | null;
   };
   const mockLeads: MockLead[] = mockCampaignContacts.map((contact, index) => ({
     id: contact.id,
@@ -1625,6 +1644,11 @@ if (mockMode) {
     audiences: index < 3 ? ["Qualified QA leaders"] : index === 3 ? ["Product-led teams"] : [],
     demo_idea: null,
     demo_artifact_id: null,
+    /* The first two leads carry what the demo email earned them: one watched
+       most of it, one has an open and nothing after it. The rest are bare. */
+    opened_at: index < 2 ? hoursAgo(20 + index) : null,
+    clicked_at: index === 0 ? hoursAgo(19) : null,
+    watched_pct: index === 0 ? 61 : null,
     created_at: hoursAgo(48 + index),
     updated_at: hoursAgo(2 + index),
   }));

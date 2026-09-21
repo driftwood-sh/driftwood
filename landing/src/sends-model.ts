@@ -39,6 +39,42 @@ export function sendKindChips(
     .map(([kind, count]) => ({ kind, count }));
 }
 
+/* ---------- demo engagement (tracked demo emails) ---------- */
+
+/* What the backend records per send once the email carries the demo GIF:
+   an open when a mail client fetches the GIF, a click when the player
+   page's script runs, and how far the video played. Every field is
+   optional so the ledger renders against a backend that predates them. */
+export type SendEngagement = {
+  tracked?: boolean;
+  opened_at?: string | null;
+  open_suspect?: boolean; // the only open looks like a mail-client prefetch
+  clicked_at?: string | null;
+  watched_pct?: number | null; // 0 to 100
+};
+
+/* The ledger's engagement chips for one send, in funnel order. An untracked
+   send has nothing to say, so it gets no chips at all — a bare row means
+   "we never asked", not "nobody opened it".
+
+   "Opened, maybe" is the honest label when the only open reads as a
+   prefetch: Apple Mail fetches the GIF before a person sees the email. A
+   click or a watch settles it, so the hedge drops as soon as either lands. */
+export function engagementChips(send: SendEngagement): string[] {
+  if (!send.tracked) return [];
+  const watched = send.watched_pct ?? 0;
+  const clicked = Boolean(send.clicked_at);
+  const chips: string[] = [];
+  if (send.opened_at) {
+    chips.push(
+      send.open_suspect && !clicked && watched <= 0 ? "Opened, maybe" : "Opened",
+    );
+  }
+  if (clicked) chips.push("Clicked");
+  if (watched > 0) chips.push(`Watched ${Math.round(watched)}%`);
+  return chips;
+}
+
 export type SentOrder = "newest" | "oldest";
 
 export type SentQuery = {

@@ -35,8 +35,9 @@ Promote a known-good prior deployment instead of guessing:
 - `landing/` — the Vite app (Vercel root). `src/App.tsx` is the page; CTAs route
   through `src/components/` (e.g. `BookDemo.tsx`, `WaitlistForm.tsx`).
 - `landing/api/` — Vercel serverless functions (e.g. `waitlist.ts`).
-- `landing/vercel.json` — rewrites (`/api/*`, `/auth/*`, `/d/*` proxy to the
-  backend; SPA catch-all to `index.html`).
+- `landing/vercel.json` — rewrites (`/api/*`, `/auth/*`, `/d/*`, `/t/*` proxy
+  to the backend; SPA catch-all to `index.html`). `/t/*` is the demo GIF and
+  its player page, so it sits outside the site CSP and uses the backend's own.
 
 ## Design language
 

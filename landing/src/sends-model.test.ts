@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_SENT_QUERY,
+  engagementChips,
   sendKindChips,
   sendKindLabel,
   sendKindRank,
@@ -57,5 +58,44 @@ test("kind and order join the query only when they narrow something", () => {
   assert.equal(
     sentLedgerQuery({ kind: "email", order: "oldest" }, 50),
     "view=sent&limit=50&kind=email&order=oldest",
+  );
+});
+
+test("an untracked send says nothing about engagement", () => {
+  assert.deepEqual(engagementChips({}), []);
+  assert.deepEqual(engagementChips({ tracked: false, opened_at: "2026-09-19T10:00:00Z" }), []);
+});
+
+test("engagement chips follow the funnel and drop the data we lack", () => {
+  assert.deepEqual(engagementChips({ tracked: true }), []);
+  assert.deepEqual(
+    engagementChips({ tracked: true, opened_at: "2026-09-19T10:00:00Z" }),
+    ["Opened"],
+  );
+  assert.deepEqual(
+    engagementChips({
+      tracked: true,
+      opened_at: "2026-09-19T10:00:00Z",
+      clicked_at: "2026-09-19T10:04:00Z",
+      watched_pct: 61.4,
+    }),
+    ["Opened", "Clicked", "Watched 61%"],
+  );
+  // A watch with no recorded open still shows what we know.
+  assert.deepEqual(engagementChips({ tracked: true, watched_pct: 100 }), ["Watched 100%"]);
+  // A zero-percent watch is not a watch.
+  assert.deepEqual(engagementChips({ tracked: true, watched_pct: 0 }), []);
+});
+
+test("a prefetch-looking open is hedged until a click or a watch settles it", () => {
+  const prefetch = { tracked: true, opened_at: "2026-09-19T10:00:00Z", open_suspect: true };
+  assert.deepEqual(engagementChips(prefetch), ["Opened, maybe"]);
+  assert.deepEqual(
+    engagementChips({ ...prefetch, clicked_at: "2026-09-19T10:04:00Z" }),
+    ["Opened", "Clicked"],
+  );
+  assert.deepEqual(
+    engagementChips({ ...prefetch, watched_pct: 45 }),
+    ["Opened", "Watched 45%"],
   );
 });

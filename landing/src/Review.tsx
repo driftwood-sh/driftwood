@@ -11,6 +11,7 @@ import { getSettings, type SendSchedule } from "./settings/api";
 import { scheduleSentence } from "./settings/model";
 import {
   DEFAULT_SENT_QUERY,
+  engagementChips,
   sendKindChips,
   sendKindLabel,
   sendKindRank,
@@ -79,6 +80,14 @@ type SendRow = {
   projected_date: string | null; // "YYYY-MM-DD"
   created_at: string;
   sent_at: string | null; // set on ledger rows (view=sent); null on live ones
+  /* Demo engagement, set on first-touch demo emails (the GIF links to a
+     player page). Optional throughout: an older backend omits them and the
+     ledger simply shows no chips. See engagementChips in sends-model.ts. */
+  tracked?: boolean;
+  opened_at?: string | null;
+  open_suspect?: boolean;
+  clicked_at?: string | null;
+  watched_pct?: number | null;
 };
 
 type SendsPageData = {
@@ -1375,6 +1384,11 @@ function SentControls({
   );
 }
 
+/* The ledger's chip: the kind of send, and under it what the recipient did
+   with the demo. One class for both so the row reads as one family. */
+const LEDGER_CHIP =
+  "rounded-full border border-line px-2 py-0.5 text-[11px] font-medium text-ink-soft";
+
 /* Every delivered send, newest first: who it went to, through what channel,
    and the exact frozen copy that went out — the after-the-fact answer to
    "what did we actually say to these people". */
@@ -1386,46 +1400,58 @@ function SentLedger({ sends, total }: { sends: SendRow[]; total: number }) {
           Showing the latest {sends.length} of {total} delivered sends.
         </p>
       )}
-      {sends.map((send) => (
-        <details
-          key={send.id}
-          className="rounded-xl border border-line bg-surface px-4 py-3 shadow-win"
-        >
-          <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-[13.5px] font-semibold text-ink">
-              {send.lead?.name ?? "(removed lead)"}
-            </span>
-            {send.lead?.company && (
-              <span className="text-[12.5px] text-ink-soft">
-                {send.lead.company}
+      {sends.map((send) => {
+        const engagement = engagementChips(send);
+        return (
+          <details
+            key={send.id}
+            className="rounded-xl border border-line bg-surface px-4 py-3 shadow-win"
+          >
+            <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-[13.5px] font-semibold text-ink">
+                {send.lead?.name ?? "(removed lead)"}
               </span>
-            )}
-            <span className="rounded-full border border-line px-2 py-0.5 text-[11px] font-medium text-ink-soft">
-              {sendKindLabel(send.kind)}
-            </span>
-            {send.subject && (
-              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-soft">
-                {send.subject}
+              {send.lead?.company && (
+                <span className="text-[12.5px] text-ink-soft">
+                  {send.lead.company}
+                </span>
+              )}
+              <span className={LEDGER_CHIP}>{sendKindLabel(send.kind)}</span>
+              {send.subject && (
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-soft">
+                  {send.subject}
+                </span>
+              )}
+              <span className="ml-auto font-mono text-[11px] text-ink-faint tabular-nums">
+                {send.sent_at ? statsTime(send.sent_at) : "sent"}
               </span>
+              {/* Under the subject: what the recipient did with the demo.
+                  Untracked sends carry no chips at all. */}
+              {engagement.length > 0 && (
+                <span className="flex w-full flex-wrap items-center gap-1.5">
+                  {engagement.map((chip) => (
+                    <span key={chip} className={LEDGER_CHIP}>
+                      {chip}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </summary>
+            {/* Emails render through the recipient-facing preview (the queued
+                tab's renderer) — the ledger shows what the recipient saw, not
+                the raw transport text with its image markers. */}
+            {send.kind === "email" ? (
+              <div className="mt-3 border-t border-line pt-3">
+                <EmailPreview subject={send.subject} body={send.note} />
+              </div>
+            ) : (
+              <pre className="mt-3 whitespace-pre-wrap border-t border-line pt-3 font-sans text-[13px] leading-relaxed text-ink">
+                {send.note}
+              </pre>
             )}
-            <span className="ml-auto font-mono text-[11px] text-ink-faint tabular-nums">
-              {send.sent_at ? statsTime(send.sent_at) : "sent"}
-            </span>
-          </summary>
-          {/* Emails render through the recipient-facing preview (the queued
-              tab's renderer) — the ledger shows what the recipient saw, not
-              the raw transport text with its image markers. */}
-          {send.kind === "email" ? (
-            <div className="mt-3 border-t border-line pt-3">
-              <EmailPreview subject={send.subject} body={send.note} />
-            </div>
-          ) : (
-            <pre className="mt-3 whitespace-pre-wrap border-t border-line pt-3 font-sans text-[13px] leading-relaxed text-ink">
-              {send.note}
-            </pre>
-          )}
-        </details>
-      ))}
+          </details>
+        );
+      })}
     </div>
   );
 }

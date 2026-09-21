@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getChannelAnalytics } from "./api";
 import { InfoIcon, RefreshIcon, TrendIcon } from "./icons";
 import {
@@ -32,9 +32,16 @@ const METRIC_KEYS = [
   { key: "contacted", label: "Contacted" },
   { key: "opened", label: "Opened" },
   { key: "clicked", label: "Clicked" },
+  { key: "watched", label: "Watched" },
   { key: "replied", label: "Replied" },
   { key: "demosBooked", label: "Demos booked" },
 ] as const;
+
+/* How to read the three demo columns. The demo rides in the email as a GIF
+   that links to a player page, so an open and a click come from two
+   different places and carry different weight. */
+const ENGAGEMENT_NOTE =
+  "An open is only a hint. Apple Mail fetches the demo image before anyone reads the email. The player page confirms a click and a watch. Watched counts the leads who reached half the video.";
 
 function MetricCell({ metric, unavailable }: { metric: MetricValue; unavailable: string }) {
   return (
@@ -147,10 +154,14 @@ export default function AnalyticsDashboard() {
     return () => controller.abort();
   }, [channel, days, offset, refreshKey, status]);
 
-  const unavailable = useMemo(
-    () =>
-      data?.definitions.find((definition) => definition.id === "opened")?.note ??
-      "This event is not tracked yet.",
+  /* A dash in the matrix gets the backend's own reason for that metric, not
+     one borrowed from another row: watch tracking rides the demo email, so
+     LinkedIn and X go dark on opened, clicked and watched alike, and each
+     definition says why in its own words. */
+  const noteFor = useCallback(
+    (id: AnalyticsStatus) =>
+      data?.definitions.find((definition) => definition.id === id)?.note ??
+      "This event is not tracked on this channel.",
     [data],
   );
   const automaticCount = data ? countAutomatic(data.people) : 0;
@@ -230,11 +241,12 @@ export default function AnalyticsDashboard() {
                 data?.channels.map((row) => (
                   <tr key={row.channel}>
                     <th scope="row"><span className={`analytics-channel-dot is-${row.channel}`} />{channelLabel(row.channel)}</th>
-                    <MetricCell metric={row.contacted} unavailable={unavailable} />
-                    <MetricCell metric={row.opened} unavailable={unavailable} />
-                    <MetricCell metric={row.clicked} unavailable={unavailable} />
-                    <MetricCell metric={row.replied} unavailable={unavailable} />
-                    <MetricCell metric={row.demosBooked} unavailable={unavailable} />
+                    <MetricCell metric={row.contacted} unavailable={noteFor("contacted")} />
+                    <MetricCell metric={row.opened} unavailable={noteFor("opened")} />
+                    <MetricCell metric={row.clicked} unavailable={noteFor("clicked")} />
+                    <MetricCell metric={row.watched} unavailable={noteFor("watched")} />
+                    <MetricCell metric={row.replied} unavailable={noteFor("replied")} />
+                    <MetricCell metric={row.demosBooked} unavailable={noteFor("demos_booked")} />
                   </tr>
                 ))
               )}
@@ -306,7 +318,7 @@ export default function AnalyticsDashboard() {
               {statusLabel(option)}
             </button>
           ))}
-          <span className="analytics-status-unavailable" title={unavailable}>Opened and clicked unavailable</span>
+          <span className="analytics-status-unavailable" title={ENGAGEMENT_NOTE}>Opens are a hint. Clicks and watches are confirmed.</span>
         </div>
 
         <div className="analytics-table-scroll">
@@ -430,7 +442,7 @@ export default function AnalyticsDashboard() {
 
       <aside className="analytics-method" aria-label="Metric definitions">
         <InfoIcon />
-        <p>Open and click tracking isn&rsquo;t available yet.</p>
+        <p>{ENGAGEMENT_NOTE}</p>
       </aside>
     </section>
   );

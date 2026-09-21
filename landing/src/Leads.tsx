@@ -55,6 +55,11 @@ type LeadRow = {
   audiences: string[];
   demo_idea: string | null;
   demo_artifact_id: string | null;
+  /* What the lead did with the demo we emailed them. Optional throughout:
+     an older backend omits them and the Demo cell shows the pill alone. */
+  opened_at?: string | null;
+  clicked_at?: string | null;
+  watched_pct?: number | null; // 0 to 100
   created_at: string;
   updated_at: string;
 };
@@ -301,6 +306,17 @@ function leadLabel(lead: LeadRow): string {
 
 function Dash() {
   return <span className="text-ink-faint">—</span>;
+}
+
+/* The furthest the lead got with the demo, as one pill. A watch outranks a
+   click and a click outranks an open, so the row shows the best signal we
+   have instead of a stack of three. Null means we have nothing to show. */
+function demoEngagementLabel(lead: LeadRow): string | null {
+  const watched = lead.watched_pct ?? 0;
+  if (watched > 0) return `Watched ${Math.round(watched)}%`;
+  if (lead.clicked_at) return "Clicked";
+  if (lead.opened_at) return "Opened";
+  return null;
 }
 
 /* Customer-facing source labels speak in capabilities, never vendor names
@@ -728,6 +744,7 @@ function LeadsTable({ canWrite }: { canWrite: boolean }) {
                           const added = relativeTime(lead.created_at);
                           const removing = removingId === lead.id;
                           const armed = armedId === lead.id;
+                          const engagement = demoEngagementLabel(lead);
                           return (
                             <tr
                               key={lead.id}
@@ -779,8 +796,15 @@ function LeadsTable({ canWrite }: { canWrite: boolean }) {
                               </td>
                               <td className={TD}>{lead.source ? sourceLabel(lead.source) : <Dash />}</td>
                               <td className={TD}>
-                                {lead.demo_artifact_id ? (
-                                  <span className={STAGE_PILL}>Demo</span>
+                                {lead.demo_artifact_id || engagement ? (
+                                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                                    {lead.demo_artifact_id && (
+                                      <span className={STAGE_PILL}>Demo</span>
+                                    )}
+                                    {engagement && (
+                                      <span className={STAGE_PILL}>{engagement}</span>
+                                    )}
+                                  </span>
                                 ) : (
                                   <Dash />
                                 )}

@@ -14,6 +14,8 @@ type RawChannelMetric = {
   contacted: RawMetricValue;
   opened: RawMetricValue;
   clicked: RawMetricValue;
+  /* Optional so the UI tolerates a backend that predates watch tracking. */
+  watched?: RawMetricValue;
   replied: RawMetricValue;
   demos_booked: RawMetricValue;
 };
@@ -69,6 +71,7 @@ function mapChannel(row: RawChannelMetric): ChannelMetric {
     contacted: row.contacted,
     opened: row.opened,
     clicked: row.clicked,
+    watched: row.watched ?? { count: null, available: false },
     replied: row.replied,
     demosBooked: row.demos_booked,
   };
