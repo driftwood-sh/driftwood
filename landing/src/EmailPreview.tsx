@@ -45,7 +45,7 @@ export function EmailPreview({ subject, body, emphasize }: EmailPreviewProps) {
                   line.text
                 ) : (
                   <a href={line.linkUrl} target="_blank" rel="noopener noreferrer">
-                    <img src={line.imageUrl} alt={line.alt} />
+                    <img src={line.imageUrl} alt={line.alt} loading="lazy" decoding="async" />
                   </a>
                 )}
               </Fragment>

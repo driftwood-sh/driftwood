@@ -67,8 +67,8 @@ const measure=(page,label)=>page.evaluate((name)=>{
    heldFile names a clip a pass keeps behind a gate of its own. Waiting on that
    one would never return, so it is left out. */
 const clipsSettled=(page,heldFile='')=>page.waitForFunction((file)=>{
- const clips=[...document.querySelectorAll('.dp-card video')].filter((v)=>!(file&&v.src.includes(file)));
- const images=[...document.querySelectorAll('.dp-card img')];
+ const clips=[...document.querySelectorAll('.dp-card video[src]')].filter((v)=>!(file&&v.src.includes(file)));
+ const images=[...document.querySelectorAll('.dp-card img')].filter((i)=>i.getBoundingClientRect().top<innerHeight+200&&i.getBoundingClientRect().bottom>-200);
  return clips.length>0 && clips.every((v)=>v.readyState>0||v.error) && images.every((i)=>i.complete);
 },heldFile);
 
@@ -152,7 +152,14 @@ async function pass(page,width){
  const shifts=await page.evaluate(()=>window.__shifts ? [...window.__shifts] : null);
  await page.getByRole('button',{name:/^Review emails/}).click();
  await clipsSettled(page);
+ // Deferred clips must be brought into view before inspecting their metadata.
+ await page.locator(`.dp-card[aria-label="${PORTRAIT_EMAIL}"]`).scrollIntoViewIfNeeded();
+ await page.waitForFunction((name)=>document.querySelector(`.dp-card[aria-label="${name}"] video`)?.readyState>0,PORTRAIT_EMAIL);
+ await clipsSettled(page);
  const portraitEmail=await measure(page,PORTRAIT_EMAIL);
+ await page.locator(`.dp-card[aria-label="${LANDSCAPE}"]`).scrollIntoViewIfNeeded();
+ await page.waitForFunction((name)=>document.querySelector(`.dp-card[aria-label="${name}"] video`)?.readyState>0,LANDSCAPE);
+ await clipsSettled(page);
  const landscape=await measure(page,LANDSCAPE);
 
  // A phone recording is framed as one: taller than it is wide, at its own

@@ -153,3 +153,12 @@ here in the same commit. Testable rules only; taste lives in the other file.
   into the viewport; clip QA now measures it honestly, requiring the same exact
   ratio, one resize, and incremental CLS below 0.05. Changing the renderer or
   adding dimensions to the media API is outside this approval-flow change.
+
+- Media in long demo lists is deferred: video elements receive their source
+  only within 200px of the viewport (or keyboard focus), then keep their loaded
+  state and playhead while scrolled away. A changed source remounts metadata,
+  duration, error, and frame state. Inline email previews use native lazy image
+  loading and asynchronous decoding. This avoids opening every authenticated
+  stream when an 80-company library or 400-email review list loads.
+  `scripts/demos-lazy-media-qa.mjs` verifies bounded initial requests, new media
+  on scrolling, and source replacement on desktop Chromium and iPhone WebKit.

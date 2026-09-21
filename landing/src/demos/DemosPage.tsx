@@ -1497,7 +1497,8 @@ function DemoCard({
   const playsInPlace = demo.library === null || demo.library.content_type.startsWith("video/");
   /* A clip that will not play has no moment to jump to, so the timestamp
      link goes with it rather than becoming a dead click. */
-  const [videoFailed, setVideoFailed] = useState(false);
+  const [failedVideoUrl, setFailedVideoUrl] = useState<string | null>(null);
+  const videoFailed = failedVideoUrl === clipHref;
 
   /* The timestamp link drives the clip on this card: jump there, play, and
      bring the player into view, since it sits under the email. */
@@ -1536,11 +1537,12 @@ function DemoCard({
         <div className="dp-col-clip">
           {clipHref && (
             <DemoVideo
+              key={`${playsInPlace}:${clipHref}`}
               ref={videoRef}
               href={clipHref}
               label={demo.heading}
               playable={playsInPlace}
-              onFailed={() => setVideoFailed(true)}
+              onFailed={() => setFailedVideoUrl(clipHref)}
             />
           )}
           {/* A demo made for a review item says which bug it shows. A demo
@@ -1763,11 +1765,45 @@ function DemoVideo({
 }) {
   const [duration, setDuration] = useState<string | null>(null);
   const [failed, setFailed] = useState(!playable);
+  const shell = useRef<HTMLDivElement>(null);
+  const [loadMedia, setLoadMedia] = useState(false);
+  useEffect(() => {
+    const node = shell.current;
+    if (!node || !playable) return;
+    // A large library can contain hundreds of authenticated video endpoints.
+    // Omitting src until the clip is nearby prevents opening all of them at
+    // once. Once loaded, scrolling away preserves its playhead and controls.
+    if (typeof IntersectionObserver === "undefined") {
+      const check = () => {
+        const rect = node.getBoundingClientRect();
+        if (rect.top < window.innerHeight + 200 && rect.bottom > -200) {
+          setLoadMedia(true);
+          window.removeEventListener("scroll", check, true);
+          window.removeEventListener("resize", check);
+        }
+      };
+      window.addEventListener("scroll", check, { capture: true, passive: true });
+      window.addEventListener("resize", check, { passive: true });
+      check();
+      return () => {
+        window.removeEventListener("scroll", check, true);
+        window.removeEventListener("resize", check);
+      };
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setLoadMedia(true);
+      observer.disconnect();
+    }, { rootMargin: "200px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [playable]);
   const [frame, setFrame] = useState<ClipFrame>(RESERVED_CLIP_FRAME);
   return (
     /* The shell is the frame, so the duration badge sits in the corner of the
        clip rather than the corner of the rail around it. */
     <div
+      ref={shell}
       className={`dp-video-shell${frame.portrait ? " is-portrait" : ""}`}
       style={{ aspectRatio: frame.aspectRatio, width: frame.width }}
     >
@@ -1788,8 +1824,9 @@ function DemoVideo({
           className="dp-video"
           controls
           playsInline
-          preload="metadata"
-          src={href}
+          preload={loadMedia ? "metadata" : "none"}
+          src={loadMedia ? href : undefined}
+          onFocus={() => setLoadMedia(true)}
           aria-label={`Demo for ${label}`}
           onError={() => {
             setFailed(true);
