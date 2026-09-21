@@ -8,6 +8,8 @@
    the video and its evidence, the send_email that carries the subject and
    body) and the customer must see one card. Grouping happens here. */
 
+import { parseEmailBody } from "../email-preview.ts";
+
 /* ---------- API shapes (the fields these segments read) ---------- */
 
 export type LeadContext = {
@@ -409,7 +411,20 @@ export function stagedWithLibrary(
    so the slug is salvaged from there rather than losing the video. */
 export function demoSlug(item: ReviewItem): string | null {
   if (item.attachment_slug) return item.attachment_slug;
-  const text = `${item.evidence?.video_timestamp ?? ""} ${item.body}`;
+  const lines = parseEmailBody(item.body).flatMap((paragraph) => paragraph.lines);
+  for (const line of lines) {
+    if (line.kind !== "image") continue;
+    // The GIF is the preview; its link target is the video to play. Photon
+    // intentionally has no attachment_slug because the MP4 is linked, not
+    // attached to the email.
+    const video = /^https:\/\/driftwood\.sh\/d\/([a-z0-9][a-z0-9_-]*)(?:[?#].*)?$/i.exec(line.linkUrl);
+    if (video) return video[1];
+  }
+  // Legacy drafts sometimes carry only a plain demo URL in body or evidence.
+  // Never salvage the image URL from an unrecognized linked-image marker.
+  const plain = lines.filter((line) => line.kind === "text" && !line.text.trim().startsWith("[!["))
+    .map((line) => line.kind === "text" ? line.text : "").join(" ");
+  const text = `${item.evidence?.video_timestamp ?? ""} ${plain}`;
   const match = /\/d\/([a-z0-9][a-z0-9_-]*)/i.exec(text);
   return match ? match[1] : null;
 }

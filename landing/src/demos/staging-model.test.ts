@@ -11,6 +11,7 @@ import {
   channelLabel,
   decisionsFor,
   demoHeading,
+  demoSlug,
   isApprovable,
   nobodyFoundLine,
   readApprovalStatus,
@@ -939,4 +940,26 @@ test("reviewing the newest company demo does not resurrect an older version", ()
     libraryRow({ demo_id: "html:new", lead_id: null, lead_name: null, company_name: "Meridian (meridian.test)", created_at: "2026-09-12T10:00:00Z" }),
   ];
   assert.deepEqual(stagedWithLibrary(cards, rows, []).map((card) => card.library), [null]);
+});
+
+
+test("a linked Photon GIF plays its destination MP4 without attaching the video", () => {
+  const email = item({
+    attachment_slug: "",
+    body: "Hey Dana,\n\nA booking concept for Meridian.\n\n[![Meridian demo preview](https://driftwood.sh/d/preview-gif)](https://driftwood.sh/d/full-mp4)\n\nDarshan\nPhoton",
+  });
+  assert.equal(demoSlug(email), "full-mp4");
+  const [card] = groupStagedDemos([email]);
+  assert.equal(card.videoSlug, "full-mp4");
+  assert.equal(email.attachment_slug, "", "rendering never adds a video attachment");
+  assert.equal(demoSlug({ ...email, attachment_slug: null }), "full-mp4");
+});
+
+test("an unsupported linked preview target never makes its GIF the video", () => {
+  const email = item({
+    attachment_slug: null,
+    body: "[![Demo](https://driftwood.sh/d/preview-gif)](https://driftwood.sh/customers/example)",
+  });
+  assert.equal(demoSlug(email), null);
+  assert.equal(demoSlug({ ...email, body: email.body + "\n\nClip: https://driftwood.sh/d/legacy-mp4" }), "legacy-mp4");
 });

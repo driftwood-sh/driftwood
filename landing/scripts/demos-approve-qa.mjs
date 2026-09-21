@@ -13,15 +13,24 @@ async function instrument(page) {
     window.__writes = [];
     let current = window.fetch;
     Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: next => {
-      current = (...args) => {
-        if (args[1]?.method === 'POST') window.__writes.push({ url: String(args[0]), body: args[1].body });
-        return next(...args);
+      current = async (...args) => {
+        const url = String(args[0]);
+        if (args[1]?.method === 'POST') window.__writes.push({ url, body: args[1].body });
+        const response = await next(...args);
+        // Photon deliberately links the MP4 instead of attaching it. Exercise
+        // that exact API shape with a distinct GIF URL and video URL.
+        if (url.includes('/dashboard/reviews?') && location.search.includes('mock=photon-review')) {
+          const body = await response.json();
+          body.pending = body.pending.map(item => ({ ...item, attachment_slug: '', body: item.body.replaceAll('https://driftwood.sh/compare.gif', 'https://driftwood.sh/d/qa-photon-gif').replaceAll('https://driftwood.sh/demo-portrait.mp4', 'https://driftwood.sh/d/qa-photon-mp4') }));
+          return new Response(JSON.stringify(body), { status: response.status, headers: response.headers });
+        }
+        return response;
       };
     }});
   });
   // Fixture preview is local media; the email still uses its real URL syntax.
-  await page.route('https://driftwood.sh/compare.gif', route => route.fulfill({ path: 'public/compare.gif', contentType: 'image/gif' }));
-  await page.route('https://driftwood.sh/demo-portrait.mp4', route => route.fulfill({ path: 'public/demo-portrait.mp4', contentType: 'video/mp4' }));
+  await page.route('https://driftwood.sh/d/qa-photon-gif', route => route.fulfill({ path: 'public/compare.gif', contentType: 'image/gif' }));
+  await page.route('**/d/qa-photon-mp4', route => route.fulfill({ path: 'public/demo-portrait.mp4', contentType: 'video/mp4' }));
 }
 const browser = await chromium.launch({ headless: true });
 try {
@@ -63,7 +72,8 @@ try {
   const dana = page.getByRole('article', { name: 'Dana Whitfield, Meridian', exact: true });
   await dana.getByText('To Dana Whitfield <dana.whitfield@example.test>', { exact: true }).waitFor();
   await dana.getByText('Meridian, in iMessage', { exact: true }).waitFor();
-  assert.equal(await dana.getByRole('img', { name: 'Meridian demo preview' }).locator('..').getAttribute('href'), 'https://driftwood.sh/demo-portrait.mp4');
+  assert.equal(await dana.getByRole('img', { name: 'Meridian demo preview' }).locator('..').getAttribute('href'), 'https://driftwood.sh/d/qa-photon-mp4');
+  assert.equal(await dana.locator('video').getAttribute('src'), '/d/qa-photon-mp4', 'the clip is the full MP4, never the preview GIF');
   await page.screenshot({ path: `${shots}/email-review-desktop.png` });
 
   // A demo can be approved while reviewed emails exist, without approving them.
