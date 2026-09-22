@@ -1022,12 +1022,13 @@ export default function DemosPage() {
      ledger also carries connection requests, which are not demos and are not
      on this page, so `total` would name rows the reader cannot find. */
   const sentCount = sent.status === "ready" ? sentDays.reduce((n, day) => n + day.rows.length, 0) : null;
+  const stagingListed = stagingCount === null ? null : libraryCards.length + approvedRows.length;
   const counts: Record<Segment, number | null> = {
     /* Nothing waits on a customer whose demos Driftwood approves, so an empty
        Staging carries no number rather than a zero that reads as "empty". The
        demos with no email yet still count: they are the customer's own work,
        whoever approves. */
-    staging: stagingCount === null ? null : libraryCards.length + approvedRows.length,
+    staging: stagingListed === 0 ? null : stagingListed,
     review: staging.status === "ready" && staging.data.complete ? decidable.length : null,
     queue: queueCount,
     sent: sentCount,
