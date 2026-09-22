@@ -1,9 +1,10 @@
-/* Workspace settings: one card today, the send schedule (days, one daily
-   window, a timezone, US federal holidays). Rendered inside WorkspacePage.
-   An owner and an admin can save; a member sees the same card with every
-   control disabled and no Save button. The page frame, card, hint and pill
-   come from team.css and the field controls from campaigns.css, so nothing
-   here is a new control style. */
+/* The Send schedule view of Settings: one card (days, one daily window, a
+   timezone, US federal holidays). Settings.tsx renders the page heading and
+   the tab strip above it, inside WorkspacePage. An owner and an admin can
+   save; a member sees the same card with every control disabled and no Save
+   button. The page frame, card, hint and pill come from team.css and the
+   field controls from campaigns.css, so nothing here is a new control
+   style. */
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CARD, prefetch, useToast } from "../dashboard-shared";
@@ -166,11 +167,6 @@ export default function Settings() {
 
   return (
     <section className="team-page" aria-labelledby="settings-heading">
-      <header className="team-heading">
-        <h1 id="settings-heading">Settings</h1>
-        <p>Workspace-wide preferences. Only owners and admins can change them.</p>
-      </header>
-
       {state.status === "error" ? (
         <div className={`${CARD} team-error`} role="alert">
           <p className="team-error-lead">Could not load settings.</p>
