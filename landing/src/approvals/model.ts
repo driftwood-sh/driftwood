@@ -3,6 +3,15 @@ export type Reviewer = 'customer' | 'driftwood';
 export type ApprovalPolicy = { mode: ApprovalMode; campaign_reviewers: Record<string, Reviewer>; version: number };
 export const MODE_LABELS: Record<ApprovalMode,string> = { auto:'Auto approval', manual:'Manual approval', hybrid:'Hybrid approval' };
 export const MODE_DESCRIPTIONS: Record<ApprovalMode,string> = { auto:'Driftwood reviews and approves messages in our dashboard before they enter the sending queue.', manual:'Your workspace owners and admins review and approve messages in Pending before they enter the sending queue.', hybrid:'Choose who approves each campaign. Driftwood reviews messages from campaigns without an override.' };
+/* Save stays disabled until the draft differs from what was loaded. A campaign
+   with no override and one set to Driftwood are the same policy, so campaigns
+   compare by the reviewer they resolve to, not by whether the key is present. */
+export function isPolicyDirty(saved: ApprovalPolicy, draft: ApprovalPolicy): boolean {
+ if (saved.mode !== draft.mode) return true;
+ const ids = new Set([...Object.keys(saved.campaign_reviewers), ...Object.keys(draft.campaign_reviewers)]);
+ for (const id of ids) if ((saved.campaign_reviewers[id] ?? 'driftwood') !== (draft.campaign_reviewers[id] ?? 'driftwood')) return true;
+ return false;
+}
 export function reviewerFor(policy: ApprovalPolicy, campaignId: string | null): Reviewer {
  if (policy.mode === 'manual') return 'customer';
  if (policy.mode === 'auto') return 'driftwood';
