@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { EmailPreview } from "../EmailPreview";
+import { approveDemoSendList, fetchDemoSendList, fetchDemoSendLists } from "./staging-api";
+import { pendingListItems, sendListBlock, type DemoSendList, type DemoSendListDetail } from "./send-list-model";
 import { fetchInWaves, useToast } from "../dashboard-shared";
 import { analyticsWindow } from "../analytics/model";
 import { withMockMode } from "../mock-mode";
@@ -119,6 +121,7 @@ type SentData = { sends: SendRow[]; total: number };
 type Armed =
   | { kind: "approve-all" }
   | { kind: "approve-group"; key: string }
+  | { kind: "approve-send-list"; key: string }
   | { kind: "pause" }
   | { kind: "resume" }
   | { kind: "skip"; key: string }
@@ -257,6 +260,32 @@ void workspaceSettings();
 export default function DemosPage() {
   const toast = useToast();
   const [segment, setSegment] = useState<Segment | null>(segmentFromUrl);
+  const [sendListId, setSendListId] = useState(() => new URLSearchParams(window.location.search).get("send_list") ?? "");
+  const [sendLists, setSendLists] = useState<DemoSendList[]>([]);
+  const [sendList, setSendList] = useState<DemoSendListDetail | null>(null);
+  const [sendListError, setSendListError] = useState<string | null>(null);
+  const [sendListLoading, setSendListLoading] = useState(true);
+  const sendListRequest = useRef(0);
+
+  const reloadSendLists = useCallback(() => {
+    const request = ++sendListRequest.current;
+    return Promise.all([
+      fetchDemoSendLists(), sendListId ? fetchDemoSendList(sendListId) : Promise.resolve(null),
+    ]).then(([lists, detail]) => {
+      if (request !== sendListRequest.current) return;
+      setSendLists(lists);
+      setSendList(detail);
+      setSendListError(null);
+    }, (error: unknown) => {
+      if (request !== sendListRequest.current) return;
+      setSendListError(error instanceof Error ? error.message : "Couldn't load this send list.");
+      setSendList(null);
+    }).finally(() => {
+      if (request === sendListRequest.current) setSendListLoading(false);
+    });
+  }, [sendListId]);
+
+  useEffect(() => { void reloadSendLists(); }, [reloadSendLists]);
   const [staging, setStaging] = useState<Load<StagingData>>({ status: "loading" });
   const [library, setLibrary] = useState<Load<LibraryData>>({ status: "loading" });
   const [queue, setQueue] = useState<Load<QueueData>>({ status: "loading" });
@@ -557,8 +586,7 @@ export default function DemosPage() {
      demos that are actually waiting on this viewer. The bug_validation item
      always belongs to Driftwood, so a demo with no customer-decidable item is
      still in our own gate and never reaches their page. */
-  const reviewDemos: StagedDemo[] =
-    staging.status === "ready" ? readyForYou(groupStagedDemos(staging.data.items)) : [];
+  const reviewDemos: StagedDemo[] = staging.status === "ready" ? readyForYou(groupStagedDemos(staging.data.items)) : [];
   /* Staging, from both sources, newest first. A demo the library holds and a
      review item covers is one card, and the review item keeps it: that copy
      carries the email. */
@@ -569,9 +597,11 @@ export default function DemosPage() {
   );
   /* The cards a decision can act on: the ones with an email, whose review
      item the decide endpoint names. */
-  const decidable = stagedDemos.filter((demo) => demo.canDecide);
-  /* Only demo approval participates in the bulk action. Email approval stays
-     on the individual card next to the exact recipient and copy. */
+  const decidable = sendListId
+    ? sendList?.id === sendListId ? readyForYou(groupStagedDemos(pendingListItems(sendList))) : []
+    : stagedDemos.filter((demo) => demo.canDecide);
+  /* Approve all demos never approves email. Named send lists have a separate
+     confirmation alongside the exact recipients and full email copy. */
   const approvable = approvableDemos(stagedDemos);
   /* Approved demos still preparing recipients belong in Staging. */
   const approvedRows = approvedNotScheduled(
@@ -581,6 +611,40 @@ export default function DemosPage() {
   const approveAllCount = approvable.length;
   const libraryCards = stagedDemos.filter((demo) => demo.library !== null);
   const emailGroups = groupEmailReviews(decidable);
+  const activeSendList = sendList?.id === sendListId ? sendList : null;
+  const listPending = activeSendList ? pendingListItems(activeSendList) : [];
+  const listBlock = sendListLoading ? "Loading this send list" : activeSendList ? sendListBlock(activeSendList) : "Choose a saved send list";
+
+  function chooseSendList(id: string) {
+    ++sendListRequest.current;
+    setSendListId(id);
+    setSendList(null);
+    setSendListLoading(true);
+    setArmed(null);
+    setSendListError(null);
+    const params = new URLSearchParams(window.location.search);
+    if (id) params.set("send_list", id);
+    else params.delete("send_list");
+    params.set("seg", "review");
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+  }
+
+  async function approveSendList() {
+    if (!activeSendList || listBlock || busy.size) return;
+    markBusy("send-list", true);
+    setArmed(null);
+    setSendListError(null);
+    try {
+      const result = await approveDemoSendList(activeSendList.id, listPending.map((item) => item.id), listPending[0].approval_policy_version);
+      toast(`${result.approved} emails approved. They will send automatically during your sending hours.`, "success");
+      await Promise.all([reloadSendLists(), loadStaging(true), loadQueue(true)]);
+      announceDemosCountChanged();
+    } catch (error) {
+      setSendListError(error instanceof Error ? error.message : "Couldn't approve this send list.");
+    } finally {
+      markBusy("send-list", false);
+    }
+  }
 
   const rows =
     /* The account pools are no longer read here: the From cell comes from the
@@ -653,6 +717,7 @@ export default function DemosPage() {
         prev && "key" in prev.what && prev.what.key === demo.key ? null : prev,
       );
       announceDemosCountChanged();
+      if (sendListId) await reloadSendLists();
       if (decision !== "approve") {
         toast(done, "success");
       } else {
@@ -1035,7 +1100,8 @@ export default function DemosPage() {
   };
 
   function emailGroupDisabledReason(group: ReturnType<typeof groupEmailReviews>[number]): string | undefined {
-    if (staging.status !== "ready" || !staging.data.complete) return "Available once every email has loaded";
+    if (sendListId ? !activeSendList || sendListLoading : staging.status !== "ready" || !staging.data.complete) return "Available once every email has loaded";
+    if (busy.has("send-list")) return "The send list is being approved";
     if (group.emails.some((email) => busy.has(email.key))) return "An email decision is in progress";
     if (group.emails.some((email) => !email.lead?.email)) return "Every recipient needs an email address";
     if (group.emails.some((email) => email.policyVersion !== group.emails[0].policyVersion)) return "Review settings changed. Refresh the emails first";
@@ -1046,7 +1112,7 @@ export default function DemosPage() {
     <DemoCard
       key={demo.key}
       demo={demo}
-      busy={busy.has(demo.key)}
+      busy={busy.has(demo.key) || busy.has("send-list")}
       pinnable={pinnable || pinned.has(demo.key)}
       pinned={pinned.has(demo.key)}
       armedSkip={isArmed({ kind: "skip", key: demo.key })}
@@ -1103,6 +1169,32 @@ export default function DemosPage() {
 
       {(shown === "staging" || shown === "review") && (
         <>
+          {shown === "review" && (
+            <div className="dp-send-list">
+              <label>
+                Send list
+                <select value={sendListId} disabled={busy.size > 0} onChange={(event) => chooseSendList(event.target.value)}>
+                  <option value="">All pending emails</option>
+                  {sendListId && !sendLists.some((list) => list.id === sendListId) && <option value={sendListId}>Selected send list</option>}
+                  {sendLists.map((list) => <option key={list.id} value={list.id}>{list.name} ({list.pending_count} pending)</option>)}
+                </select>
+              </label>
+              {sendListLoading && <p className="dp-quiet" role="status">Loading send list…</p>}
+              {activeSendList && (
+                <>
+                  <p className="dp-note">{listPending.length} of {activeSendList.email_count} emails awaiting approval in this list. Older drafts and later generations are excluded.</p>
+                  <button type="button" className="dp-btn is-primary"
+                    disabled={Boolean(listBlock) || busy.size > 0}
+                    title={listBlock ?? (busy.size ? "An email decision is in progress" : "Approve only the recipients and emails in this saved list")}
+                    onClick={() => armOrRun({ kind: "approve-send-list", key: activeSendList.id }, () => void approveSendList())}>
+                    {busy.has("send-list") ? "Queuing emails…" : isArmed({ kind: "approve-send-list", key: activeSendList.id }) ? `Queue ${listPending.length} emails? Confirm` : `Approve this list (${listPending.length} emails)`}
+                  </button>
+                  {listBlock && <p className="dp-quiet">{listBlock}</p>}
+                </>
+              )}
+              {sendListError && <p className="dp-error" role="alert">{sendListError} <button className="dp-btn" onClick={() => void reloadSendLists()}>Refresh list</button></p>}
+            </div>
+          )}
           <p className="dp-note">
             {shown === "staging"
               ? autoApproved

@@ -15,6 +15,7 @@ import { getPolicy } from "../approvals/api";
 import type { ApprovalPolicy } from "../approvals/model";
 import { getSettings, type SendSchedule } from "../settings/api";
 import type { QueueStat, ReviewItem, SendRow } from "./staging-model";
+import type { DemoSendList, DemoSendListDetail } from "./send-list-model";
 
 export type { ApprovalPolicy, SendSchedule };
 export { LIBRARY_CHUNK, fetchLibraryPage };
@@ -39,6 +40,19 @@ export type DecideResult = {
   skipped: string[];
   queued: string[];
 };
+
+export const fetchDemoSendLists = () => getJson<DemoSendList[]>("/api/v1/dashboard/demo-send-lists");
+export const fetchDemoSendList = (id: string) => getJson<DemoSendListDetail>(`/api/v1/dashboard/demo-send-lists/${encodeURIComponent(id)}`);
+
+export async function approveDemoSendList(id: string, itemIds: string[], policyVersion: number): Promise<DecideResult> {
+  const response = await fetch(`/api/v1/dashboard/demo-send-lists/${encodeURIComponent(id)}/approve`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json", "If-Match": String(policyVersion) },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  if (!response.ok) throw new Error(await errorDetail(response, "Couldn't approve this send list. Try again."));
+  return (await response.json()) as DecideResult;
+}
 
 /* What a write reports back. `missing` is the 404 that means "the backend
    does not serve this yet" — the page re-enables the control and says so,

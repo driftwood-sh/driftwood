@@ -905,6 +905,20 @@ if (mockMode) {
     sessionStorage.setItem(decisionStorageKey,JSON.stringify(savedDecisions));
     return {approved,denied,skipped,queued:approved ? [`${approved} messages queued`] : [],agent_woken:true};
   };
+  const demoSendListsApi = (init?: RequestInit, url?: string) => {
+    const path = new URL(url ?? "", location.origin).pathname;
+    const items = reviews.pending.filter((row) => demoSendListIds.includes(row.id)).map((row) => ({ ...row, ...reviewPermissions(row) }));
+    const list = { id: "today", name: "Today's demo emails", created_at: hoursAgo(1), email_count: demoSendListIds.length, pending_count: items.filter((row) => row.status === "pending").length };
+    if (path === "/api/v1/dashboard/demo-send-lists") return [list];
+    if (path === "/api/v1/dashboard/demo-send-lists/today") return { ...list, items, changed_item_ids: [] };
+    if (path === "/api/v1/dashboard/demo-send-lists/today/approve") {
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+      const pending = items.filter((row) => row.status === "pending").map((row) => row.id);
+      if (!Array.isArray(body.item_ids) || body.item_ids.length !== pending.length || !body.item_ids.every((id: string) => pending.includes(id))) return new Response(JSON.stringify({error:{detail:"This send list changed. Refresh it."}}), {status:409});
+      return decideReviews({ ...init, body: JSON.stringify(body.item_ids.map((item_id: string) => ({ item_id, decision: "approve" }))) });
+    }
+    return new Response(JSON.stringify({error:{detail:"Send list not found"}}), {status:404});
+  };
   // /api/v1/admin/probes/dashboard deliberately mocks a 404, not data: that
   // exercises the SEO/GEO page's run-zero empty state (its launch state)
   // through the real no-data code path, without the network-error console
@@ -2968,6 +2982,7 @@ if (mockMode) {
   // Matching is startsWith with NO method check, so more-specific paths must
   // come first — /sends/cancel and /sends/dismiss (POST) would otherwise be
   // swallowed by the /sends fixture, and /reviews/decide by /reviews.
+  const demoSendListIds = reviews.pending.filter((row) => row.kind === "send_email").slice(0, 2).map((row) => row.id);
   const routes: [string, unknown][] = [
     ["/api/v1/dashboard/demos", demosApi],
     ["/api/v1/dashboard/face-cloning", faceMock(params)],
@@ -3003,6 +3018,7 @@ if (mockMode) {
     // Trailing slash: the per-send controls only, never GET /sends?limit=.
     ["/api/v1/dashboard/sends/", sendOpApi],
     ["/api/v1/dashboard/sends", sendsApi],
+    ["/api/v1/dashboard/demo-send-lists", demoSendListsApi],
     ["/api/v1/dashboard/reviews/decide", decideReviews],
     // Same trailing-slash trick for POST /reviews/{id}/pin.
     ["/api/v1/dashboard/reviews/", pinReviewApi],

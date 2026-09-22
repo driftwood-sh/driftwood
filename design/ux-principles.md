@@ -135,6 +135,15 @@ here in the same commit. Testable rules only; taste lives in the other file.
   company’s full drafts, **Approve N emails & queue** requires confirmation and
   acts only on that company’s displayed, reviewable emails. Multiple drafts
   for one recipient remain separate; unseen copy cannot ride along in a decision.
+- Agent-prepared **send lists** freeze exact email drafts from an explicitly
+  requested generation batch or set of review IDs. In Review emails, choosing
+  a list shows only its recipients, videos, GIFs and full copy. **Approve this
+  list** uses the existing two-press confirmation and queues only those pending
+  IDs. Older drafts and later generations cannot join the selection. Changed
+  recipients/copy, incomplete data, or a different assigned reviewer block the
+  batch action. A missing list never falls back to approving the whole queue.
+  `?mock=photon-review-multi&seg=review&send_list=today` demonstrates a two-email
+  list within a six-email workspace; approval leaves the four other drafts alone.
 - A missing recipient email disables queueing with an explanation. Asking for
   changes and skipping a recipient remain available. Review settings determine
   the authorized reviewer; the page does not bypass that policy.

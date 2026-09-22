@@ -762,3 +762,12 @@
 
 .demos-page .dp-email-group .email-preview-body img { max-width: min(100%, 240px); max-height: 360px; width: auto; height: auto; object-fit: contain; }
 .demos-page .dp-group-approve { padding: 0 0 1.5rem; }
+.dp-send-list {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+}
+.dp-send-list label { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.dp-send-list select { max-width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-line); border-radius: 0.5rem; background: var(--color-surface); }
+.dp-send-list select:focus-visible { outline: 2px solid var(--color-tide); outline-offset: 2px; }
