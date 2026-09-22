@@ -183,7 +183,11 @@ export default function TriggerDetail({ triggerId }: { triggerId: string }) {
       setState((prev) => {
         // A poll that fails keeps the page it already painted.
         if (prev.status === "ready") return prev;
-        const notFound = reason instanceof TriggerApiError && reason.status === 404;
+        /* A 422 is an id the API cannot even look up (not a UUID). A trigger
+           that cannot exist does not exist, so it reads like a 404 rather than
+           an outage with a "Try again" that can never help. */
+        const notFound =
+          reason instanceof TriggerApiError && (reason.status === 404 || reason.status === 422);
         return {
           status: "error",
           notFound,

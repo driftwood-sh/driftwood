@@ -53,7 +53,7 @@ const CUSTOMER_PRIMARY: NavItem[] = [
   { id: "audiences", label: "Audiences", href: "/dashboard/audiences", icon: "audience" },
   { id: "demos", label: "Demos", href: "/dashboard/demos", icon: "demo" },
   { id: "triggers", label: "Triggers", href: "/dashboard/triggers", icon: "trigger" },
-  { id: "face-cloning", label: "Face Cloning", href: "/dashboard/face-cloning", icon: "people" },
+  { id: "face-cloning", label: "Face cloning", href: "/dashboard/face-cloning", icon: "people" },
   { id: "inbox", label: "Inbox", href: "/dashboard/inbox", icon: "inbox" },
 ];
 
