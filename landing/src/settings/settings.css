@@ -8,10 +8,17 @@
 .settings-card .campaign-field,
 .settings-card .campaign-check-field { margin-top: 0.45rem; }
 
-.settings-field-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; }
+.settings-field-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 1rem; }
+/* Hours keep their compact width; the timezone takes the rest of the row
+   and drops to its own line when that is less than 16rem, so the saved
+   zone's name and the "Use my time zone" link never squeeze. */
+.settings-field-row > .campaign-field:last-child { flex: 1 1 16rem; }
 
 .settings-hours { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.settings-hours select { width: auto; min-width: 6.5rem; }
+/* The .settings-card prefix outranks campaigns.css's width: 100% on
+   .campaign-field select. Equal specificity left it to stylesheet order,
+   and the production build loads campaigns.css after this file. */
+.settings-card .settings-hours select { width: auto; min-width: 6.5rem; }
 .settings-hours span { color: var(--color-ink-soft); font-size: 0.75rem; }
 
 /* Day toggles: the one button system. Pressed is the primary fill, at rest
@@ -52,10 +59,6 @@
 .settings-saved { color: var(--color-ok); }
 
 .settings-caps { margin: 0 0.1rem; color: var(--color-ink-faint); font-size: 0.76rem; line-height: 1.5; }
-
-@media (max-width: 959px) {
-  .settings-field-row { grid-template-columns: 1fr; }
-}
 
 @media (max-width: 480px) {
   .settings-days { display: grid; grid-template-columns: repeat(4, 1fr); }
