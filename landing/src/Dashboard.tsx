@@ -49,7 +49,7 @@ import {
   DOMAIN_CAP,
   INBOX_CAP,
   managedInboxCap,
-  managedInboxChip,
+  boughtInboxLine,
   useManagedInboxes,
   type MailboxesOverview,
   type ManagedMailbox,
@@ -1745,7 +1745,7 @@ function EmailRows({
               />
             ))}
           {mailboxes.map((box) => (
-            <BoughtInboxRow key={box.address} box={box} />
+            <BoughtInboxRow key={box.address} box={box} now={now} />
           ))}
         </ul>
       )}
@@ -1921,22 +1921,13 @@ function EmailAccountRow({
 }
 
 /* One bought inbox: the helm in the provider square, the address, and a
-   sub line from the pool's own fields. A warming inbox names today's
-   ramp (its cap rises day by day); a warm one counts against its cap
-   like a person's row; provisioning and paused carry their state as a
-   chip, in the pool's own words. No Disconnect: the pool has no remove
-   flow here. */
-function BoughtInboxRow({ box }: { box: ManagedMailbox }) {
-  let sub: string;
-  let chip: string | null = null;
-  if (box.status === "warming") {
-    sub = box.todays_cap > 0 ? `Bought inbox · warming up, ${box.todays_cap} a day` : "Bought inbox · warming up";
-  } else if (box.status === "active" || box.status === "ready") {
-    sub = `Bought inbox · ${box.sent_today} of ${box.todays_cap} sent today`;
-  } else {
-    sub = "Bought inbox";
-    chip = managedInboxChip(box).label;
-  }
+   sub line from the pool's own fields (boughtInboxLine): a warming inbox
+   names its day of the warm-up and its ready date; a warm one counts
+   against today's cap like a person's row, plus the full cap and its date
+   while the cap still rises. Provisioning and paused carry their state as
+   a chip. No Disconnect: the pool has no remove flow here. */
+function BoughtInboxRow({ box, now }: { box: ManagedMailbox; now: number }) {
+  const { sub, chip } = boughtInboxLine(box, now);
   return (
     <li className="team-member-row">
       <span className="email-provider-mark is-helm" aria-hidden="true">

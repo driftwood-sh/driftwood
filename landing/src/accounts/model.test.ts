@@ -175,7 +175,7 @@ test("minutes left on a pending link count down from ten and floor at zero", () 
 test("a bought inbox is ready when it can send today", () => {
   assert.equal(managedInboxReady(mailbox({ status: "active" })), true);
   assert.equal(managedInboxReady(mailbox({ status: "ready" })), true);
-  assert.equal(managedInboxReady(mailbox({ status: "warming" })), true);
+  assert.equal(managedInboxReady(mailbox({ status: "warming", todays_cap: 0 })), false);
   assert.equal(managedInboxReady(mailbox({ status: "provisioning", todays_cap: 0 })), false);
   assert.equal(managedInboxReady(mailbox({ status: "paused", todays_cap: 0 })), false);
 });
@@ -188,17 +188,23 @@ test("the summary counts usable rows plus ready bought inboxes and sums their ca
     account({ id: "d", status: "error", error: null, channelState: gmail("d@example.com", "expired") }),
   ];
   const boxes = [
-    mailbox({ address: "x@example-mail.com", status: "warming", todays_cap: 5 }),
+    mailbox({ address: "w@example-mail.com", status: "ready", warming_day: null, todays_cap: 6 }),
+    mailbox({ address: "x@example-mail.com", status: "warming", todays_cap: 0 }),
     mailbox({ address: "y@example-mail.com", status: "paused", todays_cap: 0 }),
   ];
-  assert.deepEqual(emailSummary(rows, boxes), { ready: 3, cap: 55 });
-  assert.deepEqual(emailSummary([], []), { ready: 0, cap: 0 });
+  assert.deepEqual(emailSummary(rows, boxes), { ready: 3, cap: 56, warming: 1 });
+  assert.deepEqual(emailSummary([], []), { ready: 0, cap: 0, warming: 0 });
 });
 
 test("the summary line pluralizes and drops the cap when nothing can send", () => {
   assert.equal(emailSummaryLine({ ready: 3, cap: 60 }), "3 mailboxes ready · up to 60 sends a day");
   assert.equal(emailSummaryLine({ ready: 1, cap: 20 }), "1 mailbox ready · up to 20 sends a day");
   assert.equal(emailSummaryLine({ ready: 0, cap: 0 }), "0 mailboxes ready");
+  assert.equal(emailSummaryLine({ ready: 0, cap: 0, warming: 8 }), "0 mailboxes ready · 8 warming up");
+  assert.equal(
+    emailSummaryLine({ ready: 2, cap: 12, warming: 1 }),
+    "2 mailboxes ready · up to 12 sends a day · 1 warming up",
+  );
 });
 
 test("the return banner names the viewer's newest active mailbox", () => {

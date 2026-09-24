@@ -21,6 +21,13 @@ export type ManagedMailbox = {
   warming_day: number | null;
   warming_days_total: number;
   todays_cap: number;
+  /* the daily cap a fully ramped inbox reaches, and the two dates the
+     row names: when a warming inbox turns ready, and when a ramping one
+     reaches full_cap. Optional: a backend that predates them omits them,
+     and the row then leaves the dates out. */
+  full_cap?: number;
+  ready_at?: string | null;
+  full_cap_at?: string | null;
   sent_today: number;
   health: "good" | "warning" | "unknown";
   paused_reason: string | null;
@@ -168,28 +175,49 @@ export const ownMailboxRow = (
 ): { label: string } | null =>
   own?.connected ? { label: own.address ?? "Your connected mailbox" } : null;
 
-/* One small state chip per inbox. Sentence case in the string — the chip
-   deliberately carries no text-transform, so "Warming · day 5" can't get
-   Title-Cased. Paused reads amber, never red. */
-export function managedInboxChip(box: ManagedMailbox): {
-  label: string;
-  tone: "" | " is-active" | " is-warming" | " is-paused";
-} {
+/* "Sep 25" in the viewer's time zone. */
+const shortDate = (at: number) =>
+  new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/* A future moment from an ISO string, or null when the string is absent,
+   unparseable, or already past. */
+function futureAt(iso: string | null | undefined, now: number): number | null {
+  if (!iso) return null;
+  const at = Date.parse(iso);
+  return Number.isNaN(at) || at <= now ? null : at;
+}
+
+/* What a bought inbox's row says: one sub line, plus a chip for the
+   states that cannot send (provisioning, paused). Sentence case in the
+   strings.
+   - warming: the day of the warm-up and the date it will be ready;
+   - ready/active: today's count against today's cap, and while the cap
+     is still rising, the full cap and the date it gets there. */
+export function boughtInboxLine(
+  box: ManagedMailbox,
+  now: number,
+): { sub: string; chip: string | null } {
   if (box.status === "warming") {
-    return {
-      label:
-        box.warming_day === null
-          ? "Warming"
-          : `Warming · day ${box.warming_day}`,
-      tone: " is-warming",
-    };
+    if (box.warming_day === null) return { sub: "Bought inbox · warming up", chip: null };
+    // the reconciler flips a finished inbox within minutes; never show
+    // a day past the total while it does
+    const day = Math.min(box.warming_day, box.warming_days_total);
+    let sub = `Bought inbox · warming up, day ${day} of ${box.warming_days_total}`;
+    const ready = futureAt(box.ready_at, now);
+    if (ready !== null) sub += ` · ready ${shortDate(ready)}`;
+    return { sub, chip: null };
   }
-  if (box.status === "active") return { label: "Active", tone: " is-active" };
-  if (box.status === "paused") return { label: "Paused", tone: " is-paused" };
-  // ready and provisioning stay on the sand chip
+  if (box.status === "active" || box.status === "ready") {
+    let sub = `Bought inbox · ${box.sent_today} of ${box.todays_cap} sent today`;
+    const full = futureAt(box.full_cap_at, now);
+    if (full !== null && box.full_cap !== undefined && box.todays_cap < box.full_cap) {
+      sub += ` · rises to ${box.full_cap} a day by ${shortDate(full)}`;
+    }
+    return { sub, chip: null };
+  }
   return {
-    label: box.status.charAt(0).toUpperCase() + box.status.slice(1),
-    tone: "",
+    sub: "Bought inbox",
+    chip: box.status.charAt(0).toUpperCase() + box.status.slice(1),
   };
 }
 

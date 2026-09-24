@@ -2,10 +2,100 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  boughtInboxLine,
   domainVariations,
   hasMoreDomains,
   ownMailboxRow,
+  type ManagedMailbox,
 } from "./managed-inboxes.ts";
+
+// noon UTC, so the short dates read the same in every time zone from UTC-11
+// to UTC+11; at UTC+12 and beyond, noon UTC is already the next local day
+const NOW = Date.parse("2026-09-24T12:00:00Z");
+
+function box(overrides: Partial<ManagedMailbox>): ManagedMailbox {
+  return {
+    address: "yuvan@example-mail.com",
+    domain: "example-mail.com",
+    status: "warming",
+    warming_day: 14,
+    warming_days_total: 14,
+    todays_cap: 0,
+    full_cap: 20,
+    ready_at: "2026-09-25T12:00:00Z",
+    full_cap_at: null,
+    sent_today: 0,
+    health: "unknown",
+    paused_reason: null,
+    ...overrides,
+  };
+}
+
+test("boughtInboxLine: a warming inbox names its day of the warm-up and its ready date", () => {
+  assert.deepEqual(boughtInboxLine(box({}), NOW), {
+    sub: "Bought inbox · warming up, day 14 of 14 · ready Sep 25",
+    chip: null,
+  });
+  assert.equal(
+    boughtInboxLine(box({ warming_day: 3, ready_at: "2026-10-06T12:00:00Z" }), NOW).sub,
+    "Bought inbox · warming up, day 3 of 14 · ready Oct 6",
+  );
+});
+
+test("boughtInboxLine: a warming day past the total holds at the total, a past ready date drops", () => {
+  assert.equal(
+    boughtInboxLine(box({ warming_day: 15, ready_at: "2026-09-24T11:58:00Z" }), NOW).sub,
+    "Bought inbox · warming up, day 14 of 14",
+  );
+});
+
+test("boughtInboxLine: warming without a day or a ready date says only warming up", () => {
+  assert.equal(boughtInboxLine(box({ warming_day: null, ready_at: null }), NOW).sub, "Bought inbox · warming up");
+  // a backend that predates ready_at
+  assert.equal(
+    boughtInboxLine(box({ warming_day: 5, ready_at: undefined }), NOW).sub,
+    "Bought inbox · warming up, day 5 of 14",
+  );
+});
+
+test("boughtInboxLine: a ramping inbox counts against today's cap and names when it reaches full", () => {
+  assert.deepEqual(
+    boughtInboxLine(
+      box({ status: "ready", warming_day: null, ready_at: null, todays_cap: 6, sent_today: 2, full_cap_at: "2026-11-09T12:00:00Z" }),
+      NOW,
+    ),
+    { sub: "Bought inbox · 2 of 6 sent today · rises to 20 a day by Nov 9", chip: null },
+  );
+});
+
+test("boughtInboxLine: a fully ramped inbox shows only today's count", () => {
+  assert.equal(
+    boughtInboxLine(
+      box({ status: "active", warming_day: null, ready_at: null, todays_cap: 20, sent_today: 14, full_cap_at: "2026-09-01T12:00:00Z" }),
+      NOW,
+    ).sub,
+    "Bought inbox · 14 of 20 sent today",
+  );
+  // a backend that predates full_cap_at
+  assert.equal(
+    boughtInboxLine(
+      box({ status: "ready", warming_day: null, todays_cap: 6, full_cap: undefined, full_cap_at: undefined }),
+      NOW,
+    ).sub,
+    "Bought inbox · 0 of 6 sent today",
+  );
+});
+
+test("boughtInboxLine: provisioning and paused inboxes carry their state as a chip", () => {
+  assert.deepEqual(boughtInboxLine(box({ status: "provisioning", warming_day: null }), NOW), {
+    sub: "Bought inbox",
+    chip: "Provisioning",
+  });
+  assert.deepEqual(boughtInboxLine(box({ status: "paused", warming_day: null }), NOW), {
+    sub: "Bought inbox",
+    chip: "Paused",
+  });
+});
 
 test("ownMailboxRow: a connected grant with an address leads with it", () => {
   assert.deepEqual(

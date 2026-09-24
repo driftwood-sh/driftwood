@@ -246,25 +246,26 @@ if (mockMode) {
   // shot from — stays exactly as it was. Without the flag the fixture serves
   // an empty pool, which keeps the panel absent (and keeps mock mode from
   // ever reaching the real backend on this path). Capacity counts the managed
-  // pool only; the UI adds 20/day for the connected mailbox. Each managed
-  // inbox ramps to 20/day over 14 days: 20 active + 20 ready + 10 + 10
-  // warming = 60 now, 80 when warm (the paused inbox carries nothing).
+  // pool only; the UI adds 20/day for the connected mailbox. A warming
+  // inbox carries no sends until its 14-day warm-up ends; a ready inbox
+  // starts at 5/day and ramps to 20/day: 20 active + 6 ramping = 26 now,
+  // 80 when warm (the paused inbox carries nothing).
   const inboxesFlag = params.get("inboxes");
   const managedInboxes = inboxesFlag && !["0", "off", "false"].includes(inboxesFlag.toLowerCase())
     ? {
         own_mailbox: { connected: true, address: "yuvan@autosana.ai" },
-        capacity: { current_per_day: 60, projected_per_day: 80 },
+        capacity: { current_per_day: 26, projected_per_day: 80 },
         domains: [
           { name: "autosana-ai.com", status: "active", registered_at: hoursAgo(24 * 40) },
           { name: "autosanahq.com", status: "active", registered_at: hoursAgo(24 * 6) },
           { name: "useautosana.com", status: "active", registered_at: hoursAgo(24 * 40) },
         ],
         mailboxes: [
-          { address: "yuvan@autosana-ai.com", domain: "autosana-ai.com", status: "active", warming_day: null, warming_days_total: 14, todays_cap: 20, sent_today: 14, health: "good", paused_reason: null },
-          { address: "yuvan.sundrani@autosana-ai.com", domain: "autosana-ai.com", status: "ready", warming_day: null, warming_days_total: 14, todays_cap: 20, sent_today: 0, health: "good", paused_reason: null },
-          { address: "yuvan@autosanahq.com", domain: "autosanahq.com", status: "warming", warming_day: 5, warming_days_total: 14, todays_cap: 10, sent_today: 8, health: "good", paused_reason: null },
-          { address: "yuvan.sundrani@autosanahq.com", domain: "autosanahq.com", status: "warming", warming_day: 5, warming_days_total: 14, todays_cap: 10, sent_today: 7, health: "unknown", paused_reason: null },
-          { address: "yuvan@useautosana.com", domain: "useautosana.com", status: "paused", warming_day: null, warming_days_total: 14, todays_cap: 0, sent_today: 0, health: "warning", paused_reason: "Paused Aug 24 after a bounce spike on this address. Sending resumes automatically once bounce rates settle." },
+          { address: "yuvan@autosana-ai.com", domain: "autosana-ai.com", status: "active", warming_day: null, warming_days_total: 14, todays_cap: 20, full_cap: 20, ready_at: null, full_cap_at: hoursAgo(24 * 3), sent_today: 14, health: "good", paused_reason: null },
+          { address: "yuvan.sundrani@autosana-ai.com", domain: "autosana-ai.com", status: "ready", warming_day: null, warming_days_total: 14, todays_cap: 6, full_cap: 20, ready_at: null, full_cap_at: hoursAgo(-24 * 46), sent_today: 2, health: "good", paused_reason: null },
+          { address: "yuvan@autosanahq.com", domain: "autosanahq.com", status: "warming", warming_day: 5, warming_days_total: 14, todays_cap: 0, full_cap: 20, ready_at: hoursAgo(-24 * 9.5), full_cap_at: null, sent_today: 0, health: "good", paused_reason: null },
+          { address: "yuvan.sundrani@autosanahq.com", domain: "autosanahq.com", status: "warming", warming_day: 5, warming_days_total: 14, todays_cap: 0, full_cap: 20, ready_at: hoursAgo(-24 * 9.5), full_cap_at: null, sent_today: 0, health: "unknown", paused_reason: null },
+          { address: "yuvan@useautosana.com", domain: "useautosana.com", status: "paused", warming_day: null, warming_days_total: 14, todays_cap: 0, full_cap: 20, ready_at: null, full_cap_at: null, sent_today: 0, health: "warning", paused_reason: "Paused Aug 24 after a bounce spike on this address. Sending resumes automatically once bounce rates settle." },
         ],
       }
     : { capacity: { current_per_day: 0, projected_per_day: 0 }, domains: [], mailboxes: [] };
