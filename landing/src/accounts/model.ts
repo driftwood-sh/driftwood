@@ -95,19 +95,21 @@ export function linkMinutesLeft(linkMintedAt: string | null, now: number): numbe
   return Math.max(0, Math.floor((minted + EMAIL_LINK_TTL_MS - now) / 60_000));
 }
 
-/* A bought inbox that can send today: warm, warming, or ready to start.
-   Provisioning and paused inboxes are listed but not counted. */
+/* A bought inbox that can send today: warm or ready. Warming inboxes
+   carry no sends until their warm-up ends, so they are counted apart;
+   provisioning and paused inboxes are listed but not counted. */
 export function managedInboxReady(box: ManagedMailbox): boolean {
-  return box.status === "active" || box.status === "ready" || box.status === "warming";
+  return box.status === "active" || box.status === "ready";
 }
 
-/* The summary under "Email": ready mailboxes and the day's ceiling. Ready
-   is every usable connected row plus every bought inbox that can send
-   today. The cap sums each sender's own daily ceiling. */
+/* The summary under "Email": ready mailboxes, the day's ceiling, and the
+   bought inboxes still warming up. Ready is every usable connected row
+   plus every bought inbox that can send today. The cap sums each
+   sender's own daily ceiling. */
 export function emailSummary(
   rows: SendingAccount<EmailState>[],
   mailboxes: ManagedMailbox[],
-): { ready: number; cap: number } {
+): { ready: number; cap: number; warming: number } {
   const usable = rows.filter(isUsable);
   const bought = mailboxes.filter(managedInboxReady);
   return {
@@ -115,15 +117,18 @@ export function emailSummary(
     cap:
       usable.reduce((sum, row) => sum + emailDailyCap(row), 0) +
       bought.reduce((sum, box) => sum + box.todays_cap, 0),
+    warming: mailboxes.filter((box) => box.status === "warming").length,
   };
 }
 
-/* "3 mailboxes ready · up to 60 sends a day". The cap part is left out
-   when nothing can send. */
-export function emailSummaryLine(summary: { ready: number; cap: number }): string {
-  const boxes = `${summary.ready} ${summary.ready === 1 ? "mailbox" : "mailboxes"} ready`;
-  if (summary.cap <= 0) return boxes;
-  return `${boxes} · up to ${summary.cap} ${summary.cap === 1 ? "send" : "sends"} a day`;
+/* "3 mailboxes ready · up to 60 sends a day · 2 warming up". The cap
+   part is left out when nothing can send, the warming part when none
+   is warming. */
+export function emailSummaryLine(summary: { ready: number; cap: number; warming?: number }): string {
+  let line = `${summary.ready} ${summary.ready === 1 ? "mailbox" : "mailboxes"} ready`;
+  if (summary.cap > 0) line += ` · up to ${summary.cap} ${summary.cap === 1 ? "send" : "sends"} a day`;
+  if (summary.warming) line += ` · ${summary.warming} warming up`;
+  return line;
 }
 
 /* The row the return banner names: the viewer's newest active mailbox.
