@@ -18,7 +18,8 @@ import {
   relativeTime,
   useToast,
 } from "./dashboard-shared";
-import { clearIdentity, loadIdentity } from "./identity";
+import { checkIdentity, clearIdentity, loadIdentity, type IdentityResult } from "./identity";
+import IdentityUnavailable from "./components/IdentityUnavailable";
 import AppShell from "./dashboard/AppShell";
 import { withMockMode } from "./mock-mode";
 
@@ -81,61 +82,39 @@ export default function Companies() {
     identityBoot?.cached?.is_approved ? identityBoot.cached : null,
   );
   /* Meaningful only while user is null: "checking" paints the skeleton,
-     "offline" the stay-and-retry card. A network blip is not a logout
-     (ux-principles rule 7) — only a readable non-ok /auth/me bounces. */
+     "offline" the error card with Retry. Only a 401/403 bounces to
+     /dashboard (which owns login); an unreachable backend is not a logout
+     (ux-principles rule 7). */
   const [gate, setGate] = useState<"checking" | "offline">("checking");
 
-  /* Applies a live /auth/me result. Returns false when the result is null —
-     which identity.ts hands back for BOTH a real 401 and a failed request,
-     so null alone never justifies a redirect. */
-  const applyFresh = useCallback((fresh: User | null): boolean => {
-    if (fresh?.is_approved) {
-      setUser(fresh); // swap in place when it differs from the cache
-      return true;
-    }
-    if (fresh) {
-      // Logged in, but not approved — /dashboard owns the pending screen.
+  const apply = useCallback((result: IdentityResult<User>) => {
+    if (result.state === "user" && result.user.is_approved) {
+      setUser(result.user); // swap in place when it differs from the cache
+    } else if (result.state === "unavailable") {
+      setGate("offline");
+    } else {
+      // Signed out, or logged in but not approved — /dashboard owns both.
       clearIdentity();
       window.location.href = withMockMode("/dashboard");
-      return true;
     }
-    return false;
   }, []);
 
-  /* identity.ts folds a real 401 and a dead network into the same null, so
-     when fresh comes back null we ask /auth/me once more ourselves: a
-     readable response means the session is really gone (bounce to
-     /dashboard, which owns login), a thrown fetch means the network blinked
-     — stay put and offer a retry instead of hard-redirecting mid-blip. */
   const recheck = useCallback(async () => {
     setGate("checking");
-    try {
-      const res = await fetch("/auth/me", { credentials: "include" });
-      const fresh = res.ok ? ((await res.json()) as User) : null;
-      if (applyFresh(fresh)) return;
-      // The server answered and it's a no: real 401 — same bounce as ever.
-      clearIdentity();
-      window.location.href = withMockMode("/dashboard");
-    } catch {
-      // Request never reached the server. With a cached shell already
-      // painted the user just stays where they are (data calls fail loudly
-      // on their own); with no shell we show the retry card below.
-      setGate("offline");
-    }
-  }, [applyFresh]);
+    apply(await checkIdentity<User>());
+  }, [apply]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const fresh = (await identityBoot?.fresh) ?? null;
-      if (cancelled) return;
-      if (applyFresh(fresh)) return;
-      await recheck();
+      const fresh = await identityBoot?.fresh;
+      if (cancelled || !fresh) return;
+      apply(fresh);
     })();
     return () => {
       cancelled = true;
     };
-  }, [applyFresh, recheck]);
+  }, [apply]);
 
   return (
     <ToastProvider>
@@ -143,7 +122,7 @@ export default function Companies() {
         {user ? (
           <CompaniesView user={user} />
         ) : gate === "offline" ? (
-          <OfflineView onRetry={() => void recheck()} />
+          <IdentityUnavailable onRetry={() => void recheck()} />
         ) : (
           <LoadingView />
         )}
@@ -162,35 +141,6 @@ function LoadingView() {
       <div className="mt-11 h-9 w-52 animate-pulse rounded-md bg-sand motion-reduce:animate-none" />
       <div className={`mt-5 ${CARD} p-5 sm:p-6`}>
         <TableSkeleton />
-      </div>
-    </div>
-  );
-}
-
-/* Painted only when we have no identity at all AND /auth/me was unreachable:
-   the user stays here with a retry instead of being bounced to /dashboard —
-   that bounce is reserved for real 401s. */
-function OfflineView({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <div
-        role="alert"
-        className={`w-full max-w-sm ${CARD} p-6 text-center`}
-      >
-        <p className="m-0 text-[14.5px] font-semibold text-ink">
-          Can&rsquo;t reach driftwood right now
-        </p>
-        <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-ink-soft">
-          The connection failed before we could check your session. Check
-          your network and retry.
-        </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-4 cursor-pointer rounded-full bg-tide px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-tide-deep"
-        >
-          Retry
-        </button>
       </div>
     </div>
   );

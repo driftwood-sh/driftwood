@@ -8,6 +8,7 @@ import {
   installFetchRetry,
   isRetryableRequest,
   retryAfterMs,
+  retryDelayMs,
   type Fetcher,
 } from "./fetch-retry.ts";
 
@@ -50,6 +51,8 @@ test("a GET retries through 429 and 503, honoring Retry-After", async () => {
   const { fetcher, seen } = scripted([429, 503, 200], { "Retry-After": "2" });
   const res = await fetchWithRetry(fetcher, "/api/v1/dashboard/sends", undefined, {
     attempts: 5,
+    budgetMs: 60_000,
+    random: () => 0,
     sleep: async (ms) => {
       waits.push(ms);
       assert.equal(isReconnecting(), true);
@@ -63,7 +66,7 @@ test("a GET retries through 429 and 503, honoring Retry-After", async () => {
 
 test("the last transient answer is returned when the budget runs out", async () => {
   const { fetcher, seen } = scripted([503]);
-  const res = await fetchWithRetry(fetcher, "/api/x", undefined, { attempts: 3, sleep: noWait });
+  const res = await fetchWithRetry(fetcher, "/api/x", undefined, { attempts: 3, budgetMs: 60_000, sleep: noWait });
   assert.equal(res.status, 503);
   assert.equal(seen.length, 3);
   assert.equal(isReconnecting(), false);
@@ -72,7 +75,7 @@ test("the last transient answer is returned when the budget runs out", async () 
 test("non-transient answers return at once", async () => {
   for (const status of [200, 400, 401, 403, 404, 500]) {
     const { fetcher, seen } = scripted([status]);
-    const res = await fetchWithRetry(fetcher, "/api/x", undefined, { attempts: 5, sleep: noWait });
+    const res = await fetchWithRetry(fetcher, "/api/x", undefined, { attempts: 5, budgetMs: 60_000, sleep: noWait });
     assert.equal(res.status, status);
     assert.equal(seen.length, 1, `status ${status}`);
   }
@@ -80,13 +83,13 @@ test("non-transient answers return at once", async () => {
 
 test("network errors retry; aborts and other errors do not", async () => {
   const flaky = scripted([new TypeError("Failed to fetch"), 200]);
-  const res = await fetchWithRetry(flaky.fetcher, "/api/x", undefined, { attempts: 5, sleep: noWait });
+  const res = await fetchWithRetry(flaky.fetcher, "/api/x", undefined, { attempts: 5, budgetMs: 60_000, sleep: noWait });
   assert.equal(res.status, 200);
   assert.equal(flaky.seen.length, 2);
 
   const aborted = scripted([new DOMException("aborted", "AbortError")]);
   await assert.rejects(
-    fetchWithRetry(aborted.fetcher, "/api/x", undefined, { attempts: 5, sleep: noWait }),
+    fetchWithRetry(aborted.fetcher, "/api/x", undefined, { attempts: 5, budgetMs: 60_000, sleep: noWait }),
     { name: "AbortError" },
   );
   assert.equal(aborted.seen.length, 1);
@@ -116,4 +119,54 @@ test("installFetchRetry wraps GETs and passes writes straight through", async ()
   const post = await target.fetch("/api/v1/x", { method: "POST" });
   assert.equal(post.status, 503, "a write is never repeated");
   assert.equal(seen.length, 1);
+});
+
+test("retryDelayMs: backoff is the floor, Retry-After can lengthen it, one cap", () => {
+  assert.equal(retryDelayMs(0, "0", () => 1), 1000, "Retry-After: 0 keeps the floor");
+  assert.equal(retryDelayMs(1, "Thu, 01 Jan 2004 00:00:00 GMT", () => 1), 2000, "past date too");
+  assert.equal(retryDelayMs(0, "4", () => 1), 4000);
+  assert.equal(retryDelayMs(0, "3600", () => 1), 10_000, "one wait is capped");
+});
+
+test("Retry-After: 0 does not hot-loop and the total budget is respected", async () => {
+  const waits: number[] = [];
+  const { fetcher, seen } = scripted([503], { "Retry-After": "0" });
+  const res = await fetchWithRetry(fetcher, "/api/x", undefined, {
+    attempts: 50,
+    budgetMs: 20_000,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+  });
+  assert.equal(res.status, 503);
+  assert.ok(waits.every((ms) => ms >= 500), `waits ${waits.join(",")}`);
+  const total = waits.reduce((a, b) => a + b, 0);
+  assert.ok(total <= 20_000, `waited ${total} ms`);
+  assert.equal(seen.length, waits.length + 1);
+  assert.ok(seen.length < 15, `${seen.length} calls`);
+});
+
+test("a long Retry-After cannot push one GET past the budget", async () => {
+  const waits: number[] = [];
+  const { fetcher } = scripted([429], { "Retry-After": "600" });
+  await fetchWithRetry(fetcher, "/api/x", undefined, {
+    attempts: 5,
+    budgetMs: 20_000,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+  });
+  assert.deepEqual(waits, [10_000, 10_000]);
+});
+
+test("the wait honors a Request object's own abort signal", async () => {
+  const controller = new AbortController();
+  const request = new Request(`${ORIGIN}/api/x`, { signal: controller.signal });
+  const { fetcher } = scripted([503]);
+  const pending = fetchWithRetry(fetcher, request, undefined, { attempts: 5, budgetMs: 60_000 });
+  setTimeout(() => controller.abort(), 20);
+  const start = Date.now();
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.ok(Date.now() - start < 400, "aborted during the backoff wait");
+  assert.equal(isReconnecting(), false);
 });

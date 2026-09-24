@@ -17,10 +17,14 @@ export const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 5
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 15_000;
-/* Never sleep longer than this on a server's Retry-After. */
+/* Parse cap for a server's Retry-After (retryDelayMs caps further). */
 const MAX_RETRY_AFTER_MS = 60_000;
-/* Attempts per data GET (first try included): about 20 s of waiting. */
+/* No single wait between tries is longer than this. */
+export const MAX_SINGLE_DELAY_MS = 10_000;
+/* Attempts per data GET (first try included). */
 export const DATA_GET_ATTEMPTS = 5;
+/* Total waiting per data GET: past this the caller gets the last answer. */
+export const DATA_GET_BUDGET_MS = 20_000;
 
 export type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 export type Sleep = (ms: number, signal?: AbortSignal | null) => Promise<void>;
@@ -49,6 +53,19 @@ export function backoffMs(attempt: number, random: () => number = Math.random): 
   return d / 2 + random() * (d / 2);
 }
 
+/* The wait before retry number `attempt`: the computed backoff is the
+   floor (a Retry-After of 0 or a past date must not make a hot loop), a
+   longer Retry-After is honored, and no single wait passes
+   MAX_SINGLE_DELAY_MS. */
+export function retryDelayMs(
+  attempt: number,
+  retryAfter: string | null,
+  random: () => number = Math.random,
+): number {
+  const floor = backoffMs(attempt, random);
+  return Math.min(Math.max(floor, retryAfterMs(retryAfter) ?? 0), MAX_SINGLE_DELAY_MS);
+}
+
 export const sleep: Sleep = (ms, signal) =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -70,32 +87,43 @@ function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-/* Calls fetcher until it gets a non-transient answer or runs out of
-   attempts. Returns the last Response (a caller still sees the 429/503 if
-   the outage outlasts the budget) or rethrows the last network error.
-   Aborts are never retried. */
+/* Calls fetcher until it gets a non-transient answer, runs out of
+   attempts, or would wait past budgetMs in total. Returns the last Response
+   (a caller still sees the 429/503 if the outage outlasts the budget) or
+   rethrows the last network error. Aborts are never retried, and the wait
+   honors the abort signal of init or of a Request input. */
 export async function fetchWithRetry(
   fetcher: Fetcher,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
-  options: { attempts: number; sleep?: Sleep; random?: () => number },
+  options: { attempts: number; budgetMs: number; sleep?: Sleep; random?: () => number },
 ): Promise<Response> {
-  const { attempts, sleep: wait = sleep, random = Math.random } = options;
+  const { attempts, budgetMs, sleep: wait = sleep, random = Math.random } = options;
+  const signal = init?.signal ?? (input instanceof Request ? input.signal : null);
+  let waited = 0;
   let done: (() => void) | null = null;
   try {
     for (let attempt = 0; ; attempt++) {
       const last = attempt >= attempts - 1;
       let delay: number;
+      let answer: Response | null = null;
+      let failure: unknown = null;
       try {
-        const res = await fetcher(input, init);
-        if (!TRANSIENT_STATUSES.has(res.status) || last) return res;
-        delay = retryAfterMs(res.headers.get("Retry-After")) ?? backoffMs(attempt, random);
+        answer = await fetcher(input, init);
+        if (!TRANSIENT_STATUSES.has(answer.status) || last) return answer;
+        delay = retryDelayMs(attempt, answer.headers.get("Retry-After"), random);
       } catch (error) {
         if (last || isAbort(error) || !(error instanceof TypeError)) throw error;
-        delay = backoffMs(attempt, random);
+        failure = error;
+        delay = retryDelayMs(attempt, null, random);
       }
+      if (waited + delay > budgetMs) {
+        if (answer) return answer;
+        throw failure;
+      }
+      waited += delay;
       done ??= beginReconnecting();
-      await wait(delay, init?.signal);
+      await wait(delay, signal);
     }
   } finally {
     done?.();
@@ -130,6 +158,9 @@ export function installFetchRetry(target: { fetch: Fetcher; location: { origin: 
   const inner = target.fetch.bind(target);
   target.fetch = (input, init) =>
     isRetryableRequest(input, init, target.location.origin)
-      ? fetchWithRetry(inner, input, init, { attempts: DATA_GET_ATTEMPTS })
+      ? fetchWithRetry(inner, input, init, {
+          attempts: DATA_GET_ATTEMPTS,
+          budgetMs: DATA_GET_BUDGET_MS,
+        })
       : inner(input, init);
 }

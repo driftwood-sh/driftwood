@@ -5,7 +5,8 @@ import AppShell, { type DashboardSection } from "./AppShell";
 import { WorkspacePermissionsProvider } from "./workspace-permissions";
 import type { WorkspaceRole } from "./workspace-permissions-context";
 import { withMockMode } from "../mock-mode";
-import { clearIdentity, loadIdentity } from "../identity";
+import { checkIdentity, clearIdentity, loadIdentity, type IdentityResult } from "../identity";
+import IdentityUnavailable from "../components/IdentityUnavailable";
 import { useDemosNavCount } from "../demos/nav-count";
 
 type WorkspaceUser = {
@@ -24,6 +25,7 @@ type WorkspaceUser = {
 type AuthState =
   | { status: "loading" }
   | { status: "denied" }
+  | { status: "unavailable" }
   | { status: "ready"; user: WorkspaceUser };
 
 /* /auth/me starts at module eval (chunk load), in parallel with whatever the
@@ -31,6 +33,20 @@ type AuthState =
    and the background result confirms it or swaps to the logged-out view. */
 const identityBoot =
   typeof window === "undefined" ? null : loadIdentity<WorkspaceUser>();
+
+/* Only approved users get the workspace; everyone else gets the logged-out
+   view. A 401 or 403 already cleared the identity cache. "unavailable"
+   keeps a painted workspace and otherwise shows the error card. */
+function authFrom(result: IdentityResult<WorkspaceUser>, prev: AuthState): AuthState {
+  if (result.state === "user" && result.user.is_approved) {
+    return { status: "ready", user: result.user }; // swap in place when it differs from the cache
+  }
+  if (result.state === "unavailable") {
+    return prev.status === "ready" ? prev : { status: "unavailable" };
+  }
+  if (result.state === "user") clearIdentity(); // logged in, but not approved
+  return { status: "denied" };
+}
 
 export default function WorkspacePage({
   active,
@@ -54,17 +70,9 @@ export default function WorkspacePage({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const fresh = (await identityBoot?.fresh) ?? null;
-      if (cancelled) return;
-      // Only approved users get the workspace; everyone else gets the
-      // logged-out view, exactly as before the cache existed. A 401 or
-      // 403 already cleared the identity cache.
-      if (fresh?.is_approved) {
-        setAuth({ status: "ready", user: fresh }); // swap in place when it differs from the cache
-      } else {
-        if (fresh) clearIdentity(); // logged in, but not approved
-        setAuth({ status: "denied" });
-      }
+      const fresh = await identityBoot?.fresh;
+      if (cancelled || !fresh) return;
+      setAuth((prev) => authFrom(fresh, prev));
     })();
     return () => {
       cancelled = true;
@@ -85,6 +93,20 @@ export default function WorkspacePage({
     }
   }
 
+  if (auth.status === "unavailable") {
+    return (
+      <div className="flex min-h-[100dvh] flex-col">
+        <IdentityUnavailable
+          onRetry={() => {
+            setAuth({ status: "loading" });
+            void checkIdentity<WorkspaceUser>().then((result) =>
+              setAuth((prev) => authFrom(result, prev)),
+            );
+          }}
+        />
+      </div>
+    );
+  }
   // First-ever visit only (no cached identity): nothing real to paint yet.
   if (auth.status === "loading") {
     return <div className="flex min-h-[100dvh] items-center justify-center"><span className="size-7 animate-spin rounded-full border-2 border-line border-t-tide" role="status" aria-label="Loading workspace" /></div>;

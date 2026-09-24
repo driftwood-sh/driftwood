@@ -65,7 +65,8 @@ import {
   relativeTime,
   useToast,
 } from "./dashboard-shared";
-import { clearIdentity, loadIdentity } from "./identity";
+import { checkIdentity, clearIdentity, loadIdentity, type IdentityResult } from "./identity";
+import IdentityUnavailable from "./components/IdentityUnavailable";
 import "./dashboard/overview.css";
 import "./dashboard/managed-inboxes.css";
 /* the Sending accounts lists reuse the Team page's member row */
@@ -115,7 +116,14 @@ type User = {
 type AuthState =
   | { status: "loading" }
   | { status: "logged-out" }
+  | { status: "unavailable" }
   | { status: "logged-in"; user: User };
+
+function authStateFrom(result: IdentityResult<User>): AuthState {
+  if (result.state === "user") return { status: "logged-in", user: result.user };
+  if (result.state === "unavailable") return { status: "unavailable" };
+  return { status: "logged-out" };
+}
 
 /* Every mount-time request fires at module eval, in parallel with /auth/me
    (see prefetch() in dashboard-shared): the summary, the activity feed, and
@@ -192,11 +200,14 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const fresh = (await identityBoot?.fresh) ?? null;
-      if (cancelled) return;
-      // A 401 or 403 already cleared the identity cache.
-      setAuth(
-        fresh ? { status: "logged-in", user: fresh } : { status: "logged-out" },
+      const fresh = await identityBoot?.fresh;
+      if (cancelled || !fresh) return;
+      // A 401 or 403 already cleared the identity cache. "unavailable" keeps
+      // a cached shell painted and only replaces the loading view.
+      setAuth((prev) =>
+        fresh.state === "unavailable" && prev.status === "logged-in"
+          ? prev
+          : authStateFrom(fresh),
       );
     })();
     return () => {
@@ -217,6 +228,14 @@ export default function Dashboard() {
     <ToastProvider>
       <div className="relative flex min-h-[100dvh] flex-col overflow-x-clip">
         {auth.status === "loading" && <LoadingView />}
+        {auth.status === "unavailable" && (
+          <IdentityUnavailable
+            onRetry={() => {
+              setAuth({ status: "loading" });
+              void checkIdentity<User>().then((result) => setAuth(authStateFrom(result)));
+            }}
+          />
+        )}
         {auth.status === "logged-out" && <LoggedOutView />}
         {auth.status === "logged-in" && (
           <LoggedInView user={auth.user} onLogout={handleLogout} />
@@ -2470,7 +2489,7 @@ export function SendingAccountSettings() {
  const { pool, applyPurchase } = useManagedInboxes();
  useEffect(() => {
   let current = true;
-  loadIdentity<User>().fresh.then((u) => {if(current) {setUser(u);setError(!u);}}).catch(() => {if(current) setError(true);});
+  loadIdentity<User>().fresh.then((r) => {if(current) {if (r.state === "user") setUser(r.user); else setError(true);}}).catch(() => {if(current) setError(true);});
   getAccounts().then((page) => {if(current) setAccounts({status:"ready",page});}).catch(() => {if(current) setAccounts({status:"error"});});
   return () => {current = false;};
  }, []);
