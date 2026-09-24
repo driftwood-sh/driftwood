@@ -31,6 +31,8 @@ type RawMember = {
   stage: string;
   contactable: boolean;
   outreach_eligible: boolean;
+  found_by?: AudienceMember["foundBy"];
+  added_at?: string | null;
 };
 
 type RawAudience = RawAudienceSummary & {
@@ -38,7 +40,7 @@ type RawAudience = RawAudienceSummary & {
   members: RawMember[];
 };
 
-type RawCandidate = Omit<RawMember, "contactable" | "lead_id"> & {
+type RawCandidate = Omit<RawMember, "contactable" | "lead_id" | "found_by" | "added_at"> & {
   lead_id: string | null;
   provider_record_id: string;
 };
@@ -87,6 +89,8 @@ function mapMember(raw: RawMember): AudienceMember {
     stage: raw.stage,
     contactable: raw.contactable,
     outreachEligible: raw.outreach_eligible,
+    foundBy: raw.found_by,
+    addedAt: raw.added_at ?? null,
   };
 }
 

@@ -17,10 +17,8 @@
 .approval-primary:disabled { opacity:.5; cursor:default; }
 .approval-settings a, .approval-settings [role=alert] button { color:var(--color-tide); }
 .approval-note { margin-top:1rem; }
-.inbox-approval-banner { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem; background:var(--color-tide-wash); border:1px solid var(--color-line); border-radius:10px; padding:1rem 1.25rem; }
-.inbox-approval-banner strong { font-size:.9rem; }
-.inbox-approval-banner p { font-size:.8rem; color:var(--color-ink-soft); margin-top:.3rem; max-width:760px; }
-.inbox-approval-banner a { font-size:.85rem; color:var(--color-tide); text-decoration:underline; }
 .inbox-pending-actions { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; font-size:.8rem; }
 .inbox-pending-actions p { color:var(--color-ink-soft); }
+.inbox-pending-actions p a { color:var(--color-tide); font-weight:600; }
+.inbox-pending-actions p a:hover, .inbox-pending-actions p a:focus-visible { color:var(--color-tide-deep); text-decoration:underline; }
 @media(max-width:700px) { .approval-options { grid-template-columns:1fr; } }

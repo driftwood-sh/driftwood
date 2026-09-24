@@ -1,5 +1,5 @@
 import SectionTabs from "../dashboard/SectionTabs";
-import { audienceSource, type AudienceSource } from "./model";
+import AudienceDetail from "./AudienceDetail";
 import { saveAudienceTags } from "./api";
 import {
   useEffect,
@@ -47,7 +47,6 @@ import {
   UploadIcon,
 } from "./icons";
 import { useWorkspacePermissions } from "../dashboard/workspace-permissions-context";
-import { createCampaign } from "../campaigns/api";
 import { withMockMode } from "../mock-mode";
 import "./audiences.css";
 
@@ -59,9 +58,9 @@ export default function Audiences() {
   const [view, setView] = useState<View>("library");
   const [audiences, setAudiences] = useState<AudienceSummary[]>([]);
   const [selectedAudience, setSelectedAudience] = useState<Audience | null>(null);
-  const [source, setSource] = useState<AudienceSource | "all">("all");
   const [tagDraft, setTagDraft] = useState("");
   const [tagsBusy, setTagsBusy] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -94,10 +93,6 @@ export default function Audiences() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [campaignPrompt, setCampaignPrompt] = useState<Audience | null>(null);
-  const [campaignCreating, setCampaignCreating] = useState(false);
-  const [campaignError, setCampaignError] = useState<string | null>(null);
-  const campaignButtonRef = useRef<HTMLButtonElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   /* Enter submits the rename AND blurs the input (disabling it), so the blur
      handler re-enters submitRename before the `renaming` state commits — a
@@ -152,8 +147,8 @@ export default function Audiences() {
   }, [confirmDelete]);
 
   const filteredAudiences = useMemo(
-    () => filterAudiences(audiences, "").filter((a) => `${a.name} ${a.description} ${(a.tags ?? []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase())).filter((a) => source === "all" || audienceSource(a) === source),
-    [audiences, query, source],
+    () => filterAudiences(audiences, "").filter((a) => `${a.name} ${a.description} ${(a.tags ?? []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase())),
+    [audiences, query],
   );
 
   function startBuilder() {
@@ -186,7 +181,50 @@ export default function Audiences() {
   }, [resultQuery, results]);
 
   const audienceRequest = useRef(0);
-  async function openAudience(id: string) {
+  /* The open audience lives in the URL (?audience=<id>), so Back returns to
+     the list and a refresh or a shared link reopens the same people. */
+  function writeAudienceParam(id: string | null) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("audience") === id || (id === null && !params.has("audience"))) return;
+    if (id) params.set("audience", id);
+    else params.delete("audience");
+    const search = params.toString();
+    window.history.pushState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`);
+  }
+
+  function closeAudience() {
+    ++audienceRequest.current;
+    setSelectedAudience(null);
+    setDetailLoading(false);
+    setDetailFailedId(null);
+    setDetailError(null);
+    setRenameDraft(null);
+    setConfirmDelete(false);
+    setTagsOpen(false);
+    writeAudienceParam(null);
+  }
+
+  useEffect(() => {
+    const fromUrl = () => {
+      const id = new URLSearchParams(window.location.search).get("audience");
+      if (id) void openAudience(id, false);
+      else {
+        ++audienceRequest.current;
+        setSelectedAudience(null);
+        setDetailLoading(false);
+        setDetailFailedId(null);
+      }
+    };
+    fromUrl();
+    window.addEventListener("popstate", fromUrl);
+    return () => window.removeEventListener("popstate", fromUrl);
+    // openAudience is re-created each render; the listener only needs the
+    // latest request counter, which lives in a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openAudience(id: string, record = true) {
+    if (record) writeAudienceParam(id);
     const request = ++audienceRequest.current;
     setDetailLoading(true);
     setDetailError(null);
@@ -359,38 +397,13 @@ export default function Audiences() {
       });
       setAudiences((current) => [created, ...current]);
       setSelectedAudience(created);
+      writeAudienceParam(created.id);
       setView("library");
-      setCampaignError(null);
-      setCampaignPrompt(created);
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : "The audience could not be saved.");
     } finally {
       setSaving(false);
     }
-  }
-
-  async function startCampaign(audience: Audience) {
-    if (!canWrite || campaignCreating) return;
-    setCampaignCreating(true);
-    setCampaignError(null);
-    try {
-      const campaign = await createCampaign({ audienceId: audience.id });
-      window.location.href = withMockMode(
-        `/dashboard/campaigns/${encodeURIComponent(campaign.id)}`,
-      );
-    } catch (reason) {
-      setCampaignError(
-        reason instanceof Error ? reason.message : "The campaign could not be created.",
-      );
-      setCampaignCreating(false);
-    }
-  }
-
-  function closeCampaignPrompt() {
-    if (campaignCreating) return;
-    setCampaignPrompt(null);
-    setCampaignError(null);
-    requestAnimationFrame(() => campaignButtonRef.current?.focus());
   }
 
   /* Arm-then-confirm (ux-principles rule 9): the first press turns the icon
@@ -407,7 +420,7 @@ export default function Audiences() {
     try {
       await deleteAudience(selectedAudience.id);
       setAudiences((current) => current.filter((item) => item.id !== selectedAudience.id));
-      setSelectedAudience(null);
+      closeAudience();
     } catch (reason) {
       setDetailError(reason instanceof Error ? reason.message : "The audience could not be deleted.");
     } finally {
@@ -687,216 +700,203 @@ export default function Audiences() {
     );
   }
 
+  /* Tags ride under the heading as chips; editing them is one quiet control
+     away rather than a form that is always open. */
+  const tagEditor = selectedAudience && ((selectedAudience.tags?.length ?? 0) > 0 || canWrite) && (
+    <div className="audience-tag-line">
+      {selectedAudience.tags?.map((tag) => <small key={tag}>{tag}</small>)}
+      {canWrite && !tagsOpen && (
+        <button type="button" className="audience-quiet" onClick={() => { setTagDraft((selectedAudience.tags ?? []).join(", ")); setTagsOpen(true); }}>
+          {(selectedAudience.tags?.length ?? 0) > 0 ? "Edit tags" : "Add tags"}
+        </button>
+      )}
+      {canWrite && tagsOpen && <form key={selectedAudience.id} onSubmit={async (event) => {
+        event.preventDefault(); if (tagsBusy) return; setTagsBusy(true); setSaveError(null);
+        const tags = [...new Set(tagDraft.split(',').map((t) => t.trim()).filter(Boolean))];
+        try { const saved = await saveAudienceTags(selectedAudience.id, tags); setSelectedAudience(saved); setAudiences((rows) => rows.map((a) => a.id === saved.id ? saved : a)); setTagsOpen(false); }
+        catch (reason) { setSaveError(reason instanceof Error ? reason.message : "Could not save tags."); }
+        finally { setTagsBusy(false); }
+      }}><input aria-label="Audience tags" autoFocus placeholder="Tags, separated by commas" value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setTagsOpen(false); }} /><button className="audience-secondary" disabled={tagsBusy} title={tagsBusy ? "Saving tags" : undefined}>{tagsBusy ? "Saving…" : "Save"}</button><button type="button" className="audience-quiet" onClick={() => setTagsOpen(false)} disabled={tagsBusy}>Cancel</button></form>}
+    </div>
+  );
+
+  if (detailLoading || detailFailedId || selectedAudience) {
+    return (
+      <div className="audience-page">
+        {detailLoading ? (
+          /* Mirrors the loaded detail: back link, head block, table rows. */
+          <div className="audience-detail-skeleton" role="status" aria-label="Loading audience">
+            <span className="audience-skeleton-head" aria-hidden="true"><span /><span /><span /></span>
+            <span className="audience-skeleton-strip" aria-hidden="true" />
+            {Array.from({ length: 6 }, (_, index) => (
+              <span key={index} className="audience-skeleton-member" aria-hidden="true">
+                <span className="audience-skeleton-dot" />
+                <span className="audience-skeleton-copy"><span /><span /></span>
+              </span>
+            ))}
+          </div>
+        ) : detailFailedId ? (
+          <div className="audience-state" role="alert">
+            <AudienceIcon size={24} />
+            <h2>This audience could not load</h2>
+            <p>{detailError}</p>
+            <div className="audience-state-actions">
+              <button className="audience-secondary" type="button" onClick={() => void openAudience(detailFailedId)}>Try again</button>
+              <button className="audience-secondary" type="button" onClick={closeAudience}>Back to audiences</button>
+            </div>
+          </div>
+        ) : selectedAudience ? (
+          <AudienceDetail
+            audience={selectedAudience}
+            onBack={closeAudience}
+            title={canWrite && renameDraft !== null ? (
+              <input
+                className="audience-rename-input"
+                value={renameDraft}
+                autoFocus
+                aria-label="Audience name"
+                disabled={renaming}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onBlur={() => void submitRename(selectedAudience)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitRename(selectedAudience);
+                  if (e.key === "Escape") setRenameDraft(null);
+                }}
+              />
+            ) : (
+              <h1 id="audience-detail-heading">
+                {selectedAudience.name}
+                {canWrite && (
+                  <button
+                    className="audience-rename-button"
+                    type="button"
+                    aria-label={`Rename ${selectedAudience.name}`}
+                    disabled={renaming}
+                    title={renaming ? "Renaming now" : undefined}
+                    onClick={() => setRenameDraft(selectedAudience.name)}
+                  >
+                    {renaming ? "Renaming…" : "Rename"}
+                  </button>
+                )}
+              </h1>
+            )}
+            actions={canWrite ? (
+              <>
+                <button className="audience-secondary" type="button" onClick={() => void findSimilar(selectedAudience)} disabled={findingSimilar} title={findingSimilar ? "Searching for similar people" : undefined} data-testid="find-similar-people">
+                  {findingSimilar ? "Searching…" : "Find similar"}
+                </button>
+                {confirmDelete ? (
+                  <button
+                    className="audience-danger-confirm"
+                    type="button"
+                    onClick={() => void removeAudience()}
+                    onBlur={() => setConfirmDelete(false)}
+                  >
+                    Delete audience? Confirm
+                  </button>
+                ) : (
+                  <button
+                    className="audience-icon-button"
+                    type="button"
+                    onClick={() => void removeAudience()}
+                    disabled={deleting}
+                    aria-label={`Delete ${selectedAudience.name}`}
+                    title={deleting ? "Deleting…" : "Delete this audience (its leads stay)"}
+                  >
+                    <TrashIcon size={17} />
+                  </button>
+                )}
+              </>
+            ) : undefined}
+            tags={tagEditor}
+            notices={(detailError || saveError) && (
+              <div className="audience-error audience-detail-error" role="alert">{detailError ?? saveError}</div>
+            )}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <section className="audience-page" aria-labelledby="audiences-heading">
       <header className="audience-heading">
         <h1 id="audiences-heading">Audiences</h1>
         {canWrite ? (
-          <button className="audience-primary" type="button" onClick={startBuilder} data-testid="new-audience"><PlusIcon size={17} /> New audience</button>
+          <div className="audience-heading-actions">
+            <button className="audience-secondary" type="button" onClick={() => uploadInputRef.current?.click()} disabled={importing} title={importing ? "Import in progress" : undefined}>
+              <UploadIcon size={15} /> {importing ? "Importing…" : "Upload CSV"}
+            </button>
+            <button className="audience-primary" type="button" onClick={startBuilder} data-testid="new-audience"><PlusIcon size={17} /> New audience</button>
+          </div>
         ) : (
           <span className="audience-read-only">Read-only access</span>
         )}
       </header>
+      <input ref={uploadInputRef} hidden type="file" accept=".csv,text/csv" onChange={handleLeadUpload} />
 
       <SectionTabs section="audiences" active="Lists" />
-      <div className="audience-source-tabs" aria-label="Audience source">
-        {([['all','All'],['uploaded','Uploaded'],['campaign','Campaign-generated'],['curated','Driftwood-curated']] as const).map(([id,label]) => <button type="button" key={id} aria-pressed={source === id} onClick={() => setSource(id)}>{label}<span>{audiences.filter((a) => id === 'all' || audienceSource(a) === id).length}</span></button>)}
-      </div>
-      {canWrite && <div className="audience-upload-bar"><div><strong>Bring your own audience</strong><p>Upload a CSV, check the imported contacts, then create a campaign.</p></div><button className="audience-secondary" onClick={() => uploadInputRef.current?.click()} disabled={importing}>{importing ? "Importing…" : "Upload CSV"}</button><input ref={uploadInputRef} hidden type="file" accept=".csv,text/csv" onChange={handleLeadUpload} /></div>}
 
       {importNotice && <ImportNoticeCard notice={importNotice} banner />}
 
-      <div className="audience-library-grid">
-        <div className="audience-library">
+      <div className="audience-library">
+        {audiences.length > 3 && (
           <label className="audience-library-search"><SearchIcon size={16} /><span className="audience-visually-hidden">Search audiences</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search audiences or tags" /></label>
-          <div className="audience-list" aria-busy={loading} aria-live="polite">
-            {loading ? (
-              /* Skeleton rows mirror the loaded list (rule 2) so nothing
-                 jumps when the audiences land. */
-              <div className="audience-list-skeleton" role="status" aria-label="Loading audiences">
-                {Array.from({ length: 3 }, (_, index) => (
-                  <span key={index} className="audience-skeleton-row" aria-hidden="true">
-                    <span className="audience-skeleton-dot" />
-                    <span className="audience-skeleton-copy"><span /><span /></span>
-                    <span className="audience-skeleton-cell" />
-                    <span className="audience-skeleton-cell" />
-                  </span>
-                ))}
-              </div>
-            ) : loadFailed ? (
-              <div className="audience-state" role="alert"><AudienceIcon size={24} /><h2>Audiences are unavailable</h2><p>We could not load this workspace. Try again before creating or changing an audience.</p><button className="audience-secondary" type="button" onClick={() => window.location.reload()}>Try again</button></div>
-            ) : filteredAudiences.length === 0 ? (
-              <div className="audience-state">
-                <AudienceIcon size={24} />
-                <h2>{audiences.length === 0 ? "No audiences yet" : "No audiences match"}</h2>
-                <p>
-                  {audiences.length === 0
-                    ? canWrite
-                      ? "Describe who you want to reach, or upload a CSV you already have."
-                      : "An owner or admin can create the first audience."
-                    : "Try a broader search."}
-                </p>
-                {audiences.length === 0 && canWrite && (
-                  <div className="audience-state-actions">
-                    <button className="audience-secondary" type="button" onClick={startBuilder}>Build the first audience</button>
-                    <button
-                      className="audience-secondary"
-                      type="button"
-                      onClick={() => uploadInputRef.current?.click()}
-                      disabled={importing}
-                      title={importing ? "Import in progress" : undefined}
-                    >
-                      <UploadIcon size={14} /> {importing ? "Importing…" : "Upload a CSV"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : filteredAudiences.map((audience) => (
-              <button key={audience.id} className={`audience-list-row ${selectedAudience?.id === audience.id ? "is-active" : ""}`} type="button" disabled={tagsBusy} onClick={() => openAudience(audience.id)}>
-                <span className="audience-list-icon"><AudienceIcon size={18} /></span>
-                <span className="audience-list-copy"><strong>{audience.name}</strong><span>{audience.description || "No description"}</span><span className="audience-tags">{audience.tags?.map((tag) => <small key={tag}>{tag}</small>)}</span></span>
-                <span className="audience-list-meta"><strong>{audience.memberCount.toLocaleString()}</strong><small>{audience.memberCount === 1 ? "lead" : "leads"}</small></span>
-                <span className="audience-list-meta audience-source"><strong>{providerLabel(audience.sourceProvider)}</strong><small>source</small></span>
-                <span className="audience-list-date"><small>Updated</small><span>{formatAudienceDate(audience.updatedAt)}</span></span>
-                <ArrowIcon size={16} />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <aside className={`audience-detail ${selectedAudience ? "has-audience" : ""}`} aria-label="Audience details" aria-busy={detailLoading}>
-          {detailLoading ? (
-            /* Mirrors the loaded detail: head block, count strip, member
-               rows — same heights, so the pane doesn't jump. */
-            <div className="audience-detail-skeleton" role="status" aria-label="Loading audience">
-              <span className="audience-skeleton-head" aria-hidden="true"><span /><span /><span /></span>
-              <span className="audience-skeleton-strip" aria-hidden="true" />
+        )}
+        <div className="audience-list" aria-busy={loading} aria-live="polite">
+          {loading ? (
+            /* Skeleton rows mirror the loaded list (rule 2) so nothing
+               jumps when the audiences land. */
+            <div className="audience-list-skeleton" role="status" aria-label="Loading audiences">
               {Array.from({ length: 3 }, (_, index) => (
-                <span key={index} className="audience-skeleton-member" aria-hidden="true">
+                <span key={index} className="audience-skeleton-row" aria-hidden="true">
                   <span className="audience-skeleton-dot" />
                   <span className="audience-skeleton-copy"><span /><span /></span>
+                  <span className="audience-skeleton-cell" />
+                  <span className="audience-skeleton-cell" />
                 </span>
               ))}
             </div>
-          ) : detailFailedId ? (
-            <div className="audience-state audience-detail-empty" role="alert">
+          ) : loadFailed ? (
+            <div className="audience-state" role="alert"><AudienceIcon size={24} /><h2>Audiences are unavailable</h2><p>We could not load this workspace. Try again before creating or changing an audience.</p><button className="audience-secondary" type="button" onClick={() => window.location.reload()}>Try again</button></div>
+          ) : filteredAudiences.length === 0 ? (
+            <div className="audience-state">
               <AudienceIcon size={24} />
-              <h2>This audience could not load</h2>
-              <p>{detailError}</p>
-              <button className="audience-secondary" type="button" onClick={() => void openAudience(detailFailedId)}>Try again</button>
-            </div>
-          ) : selectedAudience ? (
-            <>
-              <div className="audience-detail-head">
-                <div>
-                  <span>{providerLabel(selectedAudience.sourceProvider)}</span>
-                  {canWrite && renameDraft !== null ? (
-                    <input
-                      className="audience-rename-input"
-                      value={renameDraft}
-                      autoFocus
-                      aria-label="Audience name"
-                      disabled={renaming}
-                      onChange={(e) => setRenameDraft(e.target.value)}
-                      onBlur={() => void submitRename(selectedAudience)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void submitRename(selectedAudience);
-                        if (e.key === "Escape") setRenameDraft(null);
-                      }}
-                    />
-                  ) : (
-                    <h2>
-                      {selectedAudience.name}
-                      {canWrite && (
-                        <button
-                          className="audience-rename-button"
-                          type="button"
-                          aria-label={`Rename ${selectedAudience.name}`}
-                          disabled={renaming}
-                          onClick={() => setRenameDraft(selectedAudience.name)}
-                        >
-                          {renaming ? "Renaming…" : "Rename"}
-                        </button>
-                      )}
-                    </h2>
-                  )}
-                  <p>{selectedAudience.description || "No description added."}</p>
+              <h2>{audiences.length === 0 ? "No audiences yet" : "No audiences match"}</h2>
+              <p>
+                {audiences.length === 0
+                  ? canWrite
+                    ? "Describe who you want to reach, or upload a CSV you already have."
+                    : "An owner or admin can create the first audience."
+                  : "Try a broader search."}
+              </p>
+              {audiences.length === 0 && canWrite && (
+                <div className="audience-state-actions">
+                  <button className="audience-secondary" type="button" onClick={startBuilder}>Build the first audience</button>
+                  <button
+                    className="audience-secondary"
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    disabled={importing}
+                    title={importing ? "Import in progress" : undefined}
+                  >
+                    <UploadIcon size={14} /> {importing ? "Importing…" : "Upload a CSV"}
+                  </button>
                 </div>
-                {canWrite && (
-                  <div className="audience-detail-actions">
-                    <button className="audience-secondary" type="button" onClick={() => void findSimilar(selectedAudience)} disabled={findingSimilar} data-testid="find-similar-people">
-                      {findingSimilar ? "Searching…" : "Find similar"}
-                    </button>
-                    <button ref={campaignButtonRef} className="audience-secondary audience-build-campaign" type="button" onClick={() => void startCampaign(selectedAudience)} disabled={campaignCreating} data-testid="build-audience-campaign">
-                      {campaignCreating ? "Creating…" : "Build campaign"} <ArrowIcon size={15} />
-                    </button>
-                    {confirmDelete ? (
-                      <button
-                        className="audience-danger-confirm"
-                        type="button"
-                        onClick={() => void removeAudience()}
-                        onBlur={() => setConfirmDelete(false)}
-                      >
-                        Delete audience? Confirm
-                      </button>
-                    ) : (
-                      <button
-                        className="audience-icon-button"
-                        type="button"
-                        onClick={() => void removeAudience()}
-                        disabled={deleting}
-                        aria-label={`Delete ${selectedAudience.name}`}
-                        title={deleting ? "Deleting…" : "Delete this audience (its leads stay)"}
-                      >
-                        <TrashIcon size={17} />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="audience-tag-editor"><strong>Tags</strong><div className="audience-tags">{selectedAudience.tags?.map((tag) => <small key={tag}>{tag}</small>)}</div>
-                {canWrite && <form key={selectedAudience.id} onSubmit={async (event) => {
-                  event.preventDefault(); if (tagsBusy) return; setTagsBusy(true); setSaveError(null);
-                  const tags = [...new Set(tagDraft.split(',').map((t) => t.trim()).filter(Boolean))];
-                  try { const saved = await saveAudienceTags(selectedAudience.id, tags); setSelectedAudience(saved); setAudiences((rows) => rows.map((a) => a.id === saved.id ? saved : a)); }
-                  catch (reason) { setSaveError(reason instanceof Error ? reason.message : "Could not save tags."); }
-                  finally { setTagsBusy(false); }
-                }}><input aria-label="Audience tags" placeholder="Add tags, separated by commas" value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} /><button className="audience-secondary" disabled={tagsBusy}>{tagsBusy ? "Saving…" : "Save tags"}</button></form>}
-              </div>
-              {detailError && <div className="audience-error audience-detail-error" role="alert">{detailError}</div>}
-              {campaignError && !campaignPrompt && (
-                <div className="audience-error audience-detail-error" role="alert">{campaignError}</div>
               )}
-              <div className="audience-detail-count"><strong>{selectedAudience.memberCount.toLocaleString()}</strong><span>{selectedAudience.memberCount === 1 ? "person" : "people"} in this reusable list</span></div>
-              <div className="audience-member-list">
-                {selectedAudience.members.map((member) => (
-                  <div className="audience-member" key={member.leadId}>
-                    <span className="audience-member-avatar" aria-hidden="true">{member.name.slice(0, 1).toUpperCase()}</span>
-                    <span><strong>{member.name}</strong><small>{member.title} · {member.company}</small></span>
-                    {!member.contactable ? (
-                      <span className="audience-member-muted">Unavailable</span>
-                    ) : !member.outreachEligible ? (
-                      <span className="audience-member-muted">Needs qualification</span>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="audience-state audience-detail-empty"><AudienceIcon size={24} /><h2>Select an audience</h2><p>Open an audience to review exactly who it contains.</p></div>
-          )}
-        </aside>
+            </div>
+          ) : filteredAudiences.map((audience) => (
+            <button key={audience.id} className="audience-list-row" type="button" onClick={() => void openAudience(audience.id)}>
+              <span className="audience-list-icon"><AudienceIcon size={18} /></span>
+              <span className="audience-list-copy"><strong>{audience.name}</strong><span>{audience.description || "No description"}</span>{(audience.tags?.length ?? 0) > 0 && <span className="audience-tags">{audience.tags?.map((tag) => <small key={tag}>{tag}</small>)}</span>}</span>
+              <span className="audience-list-meta"><strong>{audience.memberCount.toLocaleString()}</strong><small>{audience.memberCount === 1 ? "person" : "people"}</small></span>
+              <span className="audience-list-meta audience-source"><strong>{providerLabel(audience.sourceProvider)}</strong><small>source</small></span>
+              <span className="audience-list-date"><small>Updated</small><span>{formatAudienceDate(audience.updatedAt)}</span></span>
+              <ArrowIcon size={16} />
+            </button>
+          ))}
+        </div>
       </div>
-
-      {campaignPrompt && (
-        <AudienceCampaignPrompt
-          audience={campaignPrompt}
-          creating={campaignCreating}
-          error={campaignError}
-          onClose={closeCampaignPrompt}
-          onCreate={() => void startCampaign(campaignPrompt)}
-        />
-      )}
     </section>
   );
 }
@@ -956,68 +956,5 @@ function ImportNoticeCard({
       </div>
       {notice.kind === "success" && <a href={withMockMode("/dashboard/leads")}>View leads</a>}
     </div>
-  );
-}
-
-function AudienceCampaignPrompt({
-  audience,
-  creating,
-  error,
-  onClose,
-  onCreate,
-}: {
-  audience: Audience;
-  creating: boolean;
-  error: string | null;
-  onClose: () => void;
-  onCreate: () => void;
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(
-    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null,
-  );
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const returnFocus = returnFocusRef.current;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    dialog.showModal();
-    return () => {
-      if (dialog.open) dialog.close();
-      document.body.style.overflow = previousOverflow;
-      if (returnFocus?.isConnected) returnFocus.focus();
-    };
-  }, []);
-
-  return (
-    <dialog
-      ref={dialogRef}
-      className="audience-campaign-dialog"
-      aria-labelledby="audience-campaign-heading"
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!creating) onClose();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        if (!creating) onClose();
-      }}
-    >
-      <span className="audience-campaign-kicker"><CheckIcon size={15} /> Audience saved</span>
-      <h2 id="audience-campaign-heading">Build the campaign now?</h2>
-      <p>{audience.name} · {audience.memberCount} {audience.memberCount === 1 ? "lead" : "leads"}</p>
-      {error && <div className="audience-error" role="alert">{error}</div>}
-      <div className="audience-campaign-actions">
-        <button className="audience-secondary" type="button" onClick={onClose} disabled={creating} autoFocus>Not now</button>
-        <button className="audience-primary" type="button" onClick={onCreate} disabled={creating}>
-          {creating ? "Creating…" : "Set sequence & schedule"} <ArrowIcon size={15} />
-        </button>
-      </div>
-    </dialog>
   );
 }

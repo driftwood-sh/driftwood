@@ -62,22 +62,19 @@ const SPLASH: CSSProperties[] = Array.from({ length: 30 }, (_, i) => {
    scripts/refresh-dashboard-shot.mjs; coordinates are percentages of that image. */
 type Widget = { id: string; l: number; t: number; w: number; h: number; title: string; body: string };
 const WIDGETS: Widget[] = [
-  { id: "linkedin", l: 0.00, t: 8.56, w: 66.00, h: 16.28,
+  { id: "linkedin", l: 1.82, t: 17.04, w: 64.53, h: 11.91,
     title: "See today’s outbound at a glance",
-    body: "Track email volume, remaining capacity, queued outreach, and the messages waiting for review." },
-  { id: "results", l: 0.00, t: 25.99, w: 100.00, h: 23.26,
+    body: "Track queued outreach, emails sent today, and who approves your messages." },
+  { id: "results", l: 0.00, t: 32.22, w: 100.00, h: 28.83,
     title: "Track your conversion rates",
     body: "Meetings booked, replies, and reply rate, updated the moment each one lands." },
-  { id: "pipeline", l: 0.00, t: 60.87, w: 100.00, h: 18.18,
-    title: "Keep campaigns moving",
-    body: "Open a campaign to see its audience, outreach sequence, and current status." },
-  { id: "latest", l: 68.07, t: 13.75, w: 30.11, h: 9.61,
+  { id: "latest", l: 68.07, t: 17.04, w: 30.11, h: 11.91,
     title: "Daily movement across your accounts",
     body: "See recent sends at a glance, then open Inbox for sent messages and replies." },
-  { id: "leads", l: 0.00, t: 50.39, w: 100.00, h: 9.33,
+  { id: "leads", l: 0.00, t: 62.47, w: 100.00, h: 11.57,
     title: "Find leads that fit your ICP",
     body: "Bring a CSV or let us source them. We match and enrich every lead either way." },
-  { id: "blacklist", l: 0.00, t: 80.21, w: 100.00, h: 19.79,
+  { id: "blacklist", l: 0.00, t: 75.46, w: 100.00, h: 24.54,
     title: "We keep track so you don't have to",
     body: "We exclude do-not-contact emails, domains, and URLs from every send." },
 ];
@@ -1010,10 +1007,10 @@ export default function App() {
                 <img
                   src="/dw-demo-dashboard-hero.webp"
                   width="2048"
-                  height="2506"
+                  height="2024"
                   loading="lazy"
                   decoding="async"
-                  alt="The Driftwood dashboard: daily email volume, pipeline metrics, campaigns, and audience controls"
+                  alt="The Driftwood dashboard: today’s sending, pipeline metrics, and audience controls"
                 />
                 {WIDGETS.map((w) => (
                   <button

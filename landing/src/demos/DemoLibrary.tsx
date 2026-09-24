@@ -37,7 +37,11 @@ function DemoDetail({ demo, feedback, onFeedback, onSend }: { demo: Demo; feedba
   );
 }
 
-export default function Demos() {
+/* Every demo made for this workspace, one at a time: the list on the left,
+   the demo itself on the right with a way to ask for a change. This is the
+   Demos page for everyone; approval views sit beside it only where the
+   customer's own team approves. */
+export default function DemoLibrary() {
   const [page, setPage] = useState<DemosPage | null>(null);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
@@ -91,17 +95,25 @@ export default function Demos() {
   }
 
   return (
-    <section className="demos-page" aria-labelledby="demos-heading">
-      <header className="demos-heading">
-        <div><h1 id="demos-heading">Demos</h1><p>See what we’ve created for your companies and contacts. Help us make the next version better.</p></div>
-        <button className="demo-button" type="button" disabled={loading} onClick={() => { setLoading(true); setRefresh((value) => value + 1); }}>Refresh</button>
-      </header>
+    <div className="demo-library-view">
       <form className="demos-search" role="search" onSubmit={search}>
         <SearchIcon size={17} /><label className="sr-only" htmlFor="demo-search">Search demos</label>
         <input id="demo-search" type="search" placeholder="Search company, lead, or demo" maxLength={200} value={queryInput} onChange={(event) => setQueryInput(event.target.value)} />
-        <button type="submit" className="demo-button" disabled={loading}>Search</button>
+        <button type="submit" className="demo-button" disabled={loading} title={loading ? "Loading demos" : undefined}>Search</button>
+        <button className="demo-button" type="button" disabled={loading} title={loading ? "Loading demos" : undefined} onClick={() => { setLoading(true); setRefresh((value) => value + 1); }}>Refresh</button>
       </form>
-      {loading ? <div className="demos-state" role="status">Loading demos…</div> : error ? (
+      {loading ? (
+        /* Mirrors the loaded layout: the list rail and the demo beside it. */
+        <div className="demos-layout" role="status" aria-label="Loading demos">
+          <div className="demos-list" aria-hidden="true">
+            {[0, 1, 2, 3, 4].map((index) => <span key={index} className="demo-skel demo-skel-item" />)}
+          </div>
+          <div className="demo-detail" aria-hidden="true">
+            <span className="demo-skel demo-skel-title" />
+            <span className="demo-skel demo-skel-player" />
+          </div>
+        </div>
+      ) : error ? (
         <div className="demos-state" role="alert"><h2>Demos could not load</h2><p>{error}</p><button className="demo-button" onClick={() => { setLoading(true); setRefresh((value) => value + 1); }}>Try again</button></div>
       ) : !selected ? (
         <div className="demos-state"><VideoIcon size={30} /><h2>{query ? "No matching demos" : "Your demos will appear here"}</h2><p>{query ? "Try another company or lead name." : "Your completed demos appear here, ready to preview and share feedback."}</p></div>
@@ -126,6 +138,6 @@ export default function Demos() {
           <DemoDetail key={feedbackKey} demo={selected} feedback={feedback[feedbackKey] ?? EMPTY_FEEDBACK} onFeedback={(patch) => updateFeedback(feedbackKey, patch)} onSend={(message, sentiment) => submitFeedback(selected, feedbackKey, message, sentiment)} />
         </div>
       )}
-    </section>
+    </div>
   );
 }

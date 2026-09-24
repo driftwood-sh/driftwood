@@ -2,6 +2,7 @@ export type DashboardSection =
   | "inbox"
   | "home"
   | "audiences"
+  | "flow"
   | "campaigns"
   | "demos"
   | "triggers"
@@ -24,6 +25,7 @@ export type DashboardIconName =
   | "inbox"
   | "overview"
   | "audience"
+  | "flow"
   | "campaign"
   | "demo"
   | "trigger"
@@ -49,7 +51,9 @@ export type NavGroup = { label?: string; items: NavItem[] };
 
 const CUSTOMER_PRIMARY: NavItem[] = [
   { id: "home", label: "Overview", href: "/dashboard", icon: "overview" },
-  { id: "campaigns", label: "Campaigns", href: "/dashboard/campaigns", icon: "campaign" },
+  /* Replaced Campaigns 2026-09-24: a workspace runs one daily flow (audience,
+     demo, email, queue), not a list of campaigns to manage. */
+  { id: "flow", label: "Flow", href: "/dashboard/flow", icon: "flow" },
   { id: "audiences", label: "Audiences", href: "/dashboard/audiences", icon: "audience" },
   { id: "demos", label: "Demos", href: "/dashboard/demos", icon: "demo" },
   { id: "triggers", label: "Triggers", href: "/dashboard/triggers", icon: "trigger" },

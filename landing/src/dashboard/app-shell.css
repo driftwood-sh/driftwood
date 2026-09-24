@@ -103,25 +103,6 @@
 
 .app-sidebar-close { display: none; }
 
-.app-sidebar-create {
-  display: flex;
-  min-height: 2.45rem;
-  align-items: center;
-  justify-content: center;
-  gap: .45rem;
-  margin: .9rem .25rem .7rem;
-  border: 1px solid var(--color-tide);
-  border-radius: .65rem;
-  background: var(--color-tide);
-  color: var(--color-surface);
-  font-size: .78rem;
-  font-weight: 650;
-  text-decoration: none;
-  transition: background 200ms cubic-bezier(.2, 0, 0, 1), transform 200ms cubic-bezier(.2, 0, 0, 1);
-}
-
-.app-sidebar-create:hover { background: var(--color-tide-deep); transform: translateY(-1px); }
-
 .app-sidebar-context {
   display: flex;
   min-height: 3.8rem;
@@ -137,6 +118,10 @@
 
 .app-sidebar-context span { color: var(--color-ink-faint); font-size: .63rem; }
 .app-sidebar-context strong { font-size: .84rem; font-weight: 650; }
+
+/* No context card above the nav (the customer shell has none), so the nav
+   carries the gap the card used to hold under the wordmark. */
+.app-sidebar-brand-row + .app-sidebar-nav { margin-top: .9rem; }
 
 .app-sidebar-nav {
   min-height: 0;
@@ -346,7 +331,6 @@
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar,
   .app-sidebar-scrim,
-  .app-sidebar-create,
   .app-sidebar-link,
   .god-mode-banner-exit { transition: none; }
 }

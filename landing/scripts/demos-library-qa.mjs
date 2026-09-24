@@ -1,6 +1,7 @@
 /* The regression this proves is gone: a workspace with demos made, nothing
    pending and nothing scheduled opened /dashboard/demos on three empty
-   segments and read it as lost work.
+   segments and read it as lost work. The page now opens on All demos, and
+   "Demos to approve" holds the library for a team that approves.
 
    Run the dev server on 5191 first: npm run dev:qa
    Another port: DEMO_QA_BASE_URL=http://127.0.0.1:5193 node scripts/demos-library-qa.mjs */
@@ -32,10 +33,14 @@ try {
    };
   }});
  });
+ // The page opens on the demos themselves.
  await page.goto(`${base}/dashboard/demos?mock=library-only`);
+ await page.locator('.demo-list-item').first().waitFor();
+ assert.match(await page.locator('.dp-segments button[aria-pressed="true"]').innerText(),/^All demos/);
+ await page.goto(`${base}/dashboard/demos?mock=library-only&view=approve-demos`);
  await page.locator('.dp-card').first().waitFor();
  const pressed=page.locator('.dp-segments button[aria-pressed="true"]');
- assert.match(await pressed.innerText(),/^Staging/);
+ assert.match(await pressed.innerText(),/^Demos to approve/);
  assert.equal(await page.locator('.dp-empty').count(),0);
  // Every row arrives, and the count says so rather than naming the first page.
  await page.locator('.dp-card').nth(110).waitFor();
@@ -77,16 +82,18 @@ try {
  // 111 clips make a very tall page; the fold is what a reader sees.
  await page.screenshot({path:`${shots}/demos-staging-library-only.png`});
 
- // A link already shared still lands somewhere real.
+ // A link already shared still lands somewhere real: the library itself.
  await page.goto(`${base}/dashboard/demos/library?mock=library-only`);
- await page.locator('.dp-card').first().waitFor();
+ await page.locator('.demo-list-item').first().waitFor();
  assert.match(new URL(page.url()).pathname,/^\/dashboard\/demos$/);
- assert.match(await page.locator('.dp-segments button[aria-pressed="true"]').innerText(),/^Staging/);
+ assert.match(await page.locator('.dp-segments button[aria-pressed="true"]').innerText(),/^All demos/);
+ // An old ?seg=staging link opens the approval view it meant.
+ await page.goto(`${base}/dashboard/demos?seg=staging&mock=library-only`);
  await page.locator('.dp-card').nth(110).waitFor();
  assert.equal(await page.locator('.dp-card').count(),111);
 
  // A demo both sources hold is one card, and it keeps its email.
- await page.goto(`${base}/dashboard/demos?mock=1`);
+ await page.goto(`${base}/dashboard/demos?mock=1&view=approve-emails`);
  await page.locator('.dp-card').first().waitFor();
  const northstar=page.locator('.dp-card[aria-label*="Priya Patel"]');
  assert.equal(await northstar.count(),1);
@@ -94,7 +101,7 @@ try {
  assert.equal(await northstar.getByRole('button',{name:'Approve email & queue',exact:true}).count(),1);
  // The same page still carries the demos that have no email yet, and those
  // are approved too: one press says "send this to the right people there".
- await page.getByRole('button',{name:/^Staging/}).click();
+ await page.getByRole('button',{name:/^Demos to approve/}).click();
  const sample=page.locator('.dp-card[aria-label*="Sample company"]');
  assert.equal(await sample.count(),1);
  assert.equal(await sample.getByRole('button',{name:'Approve demo',exact:true}).count(),1);
@@ -111,7 +118,7 @@ try {
  // those companies arrive again as a lead-linked video under the bare company
  // name. A customer counts companies, so the page owes 60 cards and a count
  // that says 60.
- await page.goto(`${base}/dashboard/demos?mock=photon-shaped`);
+ await page.goto(`${base}/dashboard/demos?mock=photon-shaped&view=approve-demos`);
  await page.locator('.dp-card').first().waitFor();
  const staging=page.locator('.dp-segments button[aria-pressed="true"]');
  // The count renders only once both sources are whole, so it is also the
@@ -130,26 +137,26 @@ try {
  assert.ok(shown.includes('Wanderu (wanderu.com)'),'Wanderu keeps its newer run');
  await page.screenshot({path:`${shots}/demos-staging-photon-shaped.png`});
 
- // A segment the reader picks still wins.
+ // The retired Queue and Sent segments send their old links where that work lives now.
  await page.goto(`${base}/dashboard/demos?seg=sent&mock=library-only`);
- await page.locator('.dp-empty').waitFor();
- assert.match(await page.locator('.dp-segments button[aria-pressed="true"]').innerText(),/^Sent/);
- assert.equal(await page.getByRole('link',{name:'All demo videos'}).count(),0);
+ await page.waitForURL(/\/dashboard\/inbox\?.*tab=sent/);
+ await page.goto(`${base}/dashboard/demos?seg=queue&mock=library-only`);
+ await page.waitForURL(/\/dashboard\/flow/);
 
  assert.deepEqual(errors,[]);
- console.log('Desktop Chromium: library demos in Staging, Approve on every one of them, no dead controls, one card per demo, one card per company, /library resolves, explicit segment wins.');
+ console.log('Desktop Chromium: All demos first, library demos in Demos to approve, Approve on every one of them, no dead controls, one card per demo, one card per company, /library and old ?seg= links resolve.');
 } finally {await browser.close();}
 
 const mobile=await webkit.launch({headless:true});
 try {
  const page=await mobile.newPage({...devices['iPhone 13']});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(`${base}/dashboard/demos?mock=library-only`);
+ await page.goto(`${base}/dashboard/demos?mock=library-only&view=approve-demos`);
  await page.locator('.dp-card').first().waitFor();
  await page.locator('.dp-card').nth(110).waitFor();
  assert.equal(await page.locator('.dp-card').count(),111);
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  await page.screenshot({path:`${shots}/demos-staging-library-only-mobile.png`});
  assert.deepEqual(errors,[]);
- console.log('iPhone WebKit: Staging holds the library and the page does not scroll sideways.');
+ console.log('iPhone WebKit: Demos to approve holds the library and the page does not scroll sideways.');
 } finally {await mobile.close();}

@@ -3,7 +3,7 @@ import { fromApproval, fromReply, fromSend, type Message, type SendRecord, type 
 export type Feed = 'sent' | 'queue' | 'replies' | 'approvals';
 export type FeedPage = { rows: Message[]; next: number | null };
 export const FEEDS: Feed[] = ['queue', 'sent', 'replies', 'approvals'];
-export const feedLabels: Record<Feed,string> = { queue:'Queued messages', sent:'Sent history', replies:'Replies', approvals:'Awaiting approval' };
+export const feedLabels: Record<Feed,string> = { queue:'Queued messages', sent:'Sent history', replies:'Replies', approvals:'Drafts in review' };
 async function json<T>(path: string, signal: AbortSignal): Promise<T> {
  const res = await fetch(path, {credentials:'include', signal});
  if (!res.ok) throw new Error(`Unavailable (${res.status})`);

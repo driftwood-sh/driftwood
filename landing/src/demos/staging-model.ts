@@ -1,6 +1,6 @@
 /* Pure logic behind /dashboard/demos — the customer's Staging, Queue and
    Sent segments. Nothing here touches the DOM or the network, so node --test
-   pins the grouping and the copy (the sends-model.ts / overview-model.ts
+   pins the grouping and the copy (the sends-model.ts / flow-model.ts
    convention).
 
    The one idea this file encodes: a demo is not a review item. Today the

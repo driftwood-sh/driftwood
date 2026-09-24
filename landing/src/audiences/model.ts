@@ -1,3 +1,8 @@
+/* How a member first reached the workspace. "lead_search" is the discovery
+   search (and its company backfill); "agent" is anything else Driftwood's
+   agent sourced. */
+export type FoundBy = "lead_search" | "upload" | "agent" | "manual";
+
 export type AudienceMember = {
   leadId: string;
   name: string;
@@ -8,6 +13,10 @@ export type AudienceMember = {
   stage: string;
   contactable: boolean;
   outreachEligible: boolean;
+  /* Absent from a backend that predates the field; memberFoundBy() falls back
+     to the audience's own source. */
+  foundBy?: FoundBy;
+  addedAt?: string | null;
 };
 
 export type AudienceSource = "uploaded" | "campaign" | "curated" | "other";
@@ -190,6 +199,101 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? "Imported";
+}
+
+/* Where each person came from, in capability words (rule 18: the search
+   vendor is plumbing, so it reads as "Lead search", the name the search box
+   already carries). */
+export const FOUND_BY_LABELS: Record<FoundBy, string> = {
+  lead_search: "Lead search",
+  upload: "CSV upload",
+  agent: "Driftwood",
+  manual: "Added by hand",
+};
+
+/* A member's source, or the audience's when the member row does not carry
+   one: a lead-search audience is lead search's finds, an upload is uploads.
+   Null when neither says, which the table shows as a dash. */
+export function memberFoundBy(member: AudienceMember, audience: Pick<AudienceSummary, "sourceProvider">): FoundBy | null {
+  if (member.foundBy) return member.foundBy;
+  if (audience.sourceProvider === "orange_slice") return "lead_search";
+  if (audience.sourceProvider === "csv_upload") return "upload";
+  return null;
+}
+
+export type MemberFilter = "all" | FoundBy;
+
+/* The source chips over the member table: All, then each source that has
+   anyone in it, largest first. */
+export function foundByCounts(
+  members: AudienceMember[],
+  audience: Pick<AudienceSummary, "sourceProvider">,
+): Array<{ id: MemberFilter; label: string; count: number }> {
+  const counts = new Map<FoundBy, number>();
+  for (const member of members) {
+    const found = memberFoundBy(member, audience);
+    if (found) counts.set(found, (counts.get(found) ?? 0) + 1);
+  }
+  const chips = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, count]) => ({ id, label: FOUND_BY_LABELS[id], count }));
+  return [{ id: "all", label: "All", count: members.length }, ...chips];
+}
+
+export function filterMembers(
+  members: AudienceMember[],
+  audience: Pick<AudienceSummary, "sourceProvider">,
+  filter: MemberFilter,
+  query: string,
+): AudienceMember[] {
+  const normalized = query.trim().toLowerCase();
+  return members.filter(
+    (member) =>
+      (filter === "all" || memberFoundBy(member, audience) === filter) &&
+      (!normalized ||
+        [member.name, member.title, member.company, member.email]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalized)),
+  );
+}
+
+/* The placeholder words mapMember() writes for a missing value are display
+   text, not data, so an export leaves those cells empty. */
+const PLACEHOLDERS = new Set(["Unnamed lead", "Role not set", "Email not set"]);
+
+function csvCell(value: string | null | undefined): string {
+  const text = value && !PLACEHOLDERS.has(value) ? value : "";
+  /* A leading = + - @ turns a cell into a formula in a spreadsheet. */
+  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+}
+
+export function membersCsv(
+  members: AudienceMember[],
+  audience: Pick<AudienceSummary, "sourceProvider">,
+): string {
+  const header = ["Name", "Title", "Company", "Email", "LinkedIn", "Stage", "Found by", "Added"];
+  const rows = members.map((member) => {
+    const found = memberFoundBy(member, audience);
+    return [
+      member.name,
+      member.title,
+      member.company,
+      member.email,
+      member.linkedinUrl,
+      stageLabel(member.stage),
+      found ? FOUND_BY_LABELS[found] : "",
+      member.addedAt ? member.addedAt.slice(0, 10) : "",
+    ].map(csvCell).join(",");
+  });
+  return [header.join(","), ...rows].join("\r\n") + "\r\n";
+}
+
+/* "qualified-qa-leaders.csv" from the audience's name. */
+export function csvFilename(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `${slug || "audience"}.csv`;
 }
 
 export function formatAudienceDate(iso: string): string {

@@ -1,4 +1,3 @@
-.demos-page { max-width: 1320px; margin: 0 auto; padding: 8px 0 40px; color: #16181b; }
 .demos-heading, .demo-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .demos-heading h1 { margin: 0; font-size: clamp(1.7rem, 3.6vw, 2.25rem); font-weight: 600; letter-spacing: -.015em; }
 .demos-heading p, .demo-detail-heading p { margin: 9px 0 0; color: #6a737d; font-size: 13px; line-height: 1.6; }
@@ -7,8 +6,8 @@
 .demo-button.is-primary { background: #15557e; border-color: #15557e; color: white; }
 .demo-button.is-primary:hover { background: #0d3c5b; }
 .demo-button:disabled { opacity: .5; cursor: not-allowed; }
-.demos-page :is(button, a, input, textarea):focus-visible { outline: 2px solid #15557e; outline-offset: 3px; }
-.demos-search { margin: 28px 0 24px; display: flex; align-items: center; gap: 12px; color: #6a737d; border-bottom: 1px solid #e9ebee; padding-bottom: 18px; }
+.demo-library-view :is(button, a, input, textarea):focus-visible { outline: 2px solid #15557e; outline-offset: 3px; }
+.demos-search { margin: 18px 0 24px; display: flex; align-items: center; gap: 12px; color: #6a737d; border-bottom: 1px solid #e9ebee; padding-bottom: 18px; }
 .demos-search input { min-width: 0; flex: 1; padding: 9px 0; border: 0; background: transparent; color: #16181b; font: inherit; font-size: 13px; }
 .demos-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 28px; align-items: start; }
 .demos-count { font-size: 12px; color: #6a737d; margin: 0 0 14px; }
@@ -78,3 +77,11 @@
   .demo-detail-heading { align-items: flex-start; flex-wrap: wrap; gap: 13px; }
   .demo-web { min-height: 300px; }
 }
+
+/* loading, in the shape of the loaded list and demo (ux-principles rule 2) */
+.demo-skel { display: block; border-radius: 10px; background: #e9ebee; animation: demo-skel-pulse 1.7s ease-in-out infinite; }
+.demo-skel-item { height: 74px; }
+.demo-skel-title { width: 40%; height: 20px; }
+.demo-skel-player { margin-top: 22px; aspect-ratio: 16 / 10; }
+@keyframes demo-skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .demo-skel { animation: none; } }

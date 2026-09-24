@@ -1,7 +1,7 @@
 /* Pure logic for the sends surfaces (the review page's Queued + Sent tabs):
    send-kind vocabulary, chip building, and the sent-ledger query string.
    Extracted from Review.tsx so it's testable without the view (the
-   overview-model.ts pattern). */
+   staging-model.ts pattern). */
 
 /* ScheduledSend kinds use the stats-strip vocabulary, not the review-item
    one — same human labels either way. */

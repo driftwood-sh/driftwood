@@ -17,7 +17,7 @@ const Agents = lazy(() => import('./Agents.tsx'))
 const Conversation = lazy(() => import('./Conversation.tsx'))
 const Fleet = lazy(() => import('./fleet/Fleet.tsx'))
 const Drift = lazy(() => import('./drift/Drift.tsx'))
-const Campaigns = lazy(() => import('./campaigns/Campaigns.tsx'))
+const Flow = lazy(() => import('./flow/Flow.tsx'))
 const CampaignBuilder = lazy(() => import('./campaigns/CampaignBuilder.tsx'))
 const Audiences = lazy(() => import('./audiences/Audiences.tsx'))
 const DemosPage = lazy(() => import('./demos/DemosPage.tsx'))
@@ -40,12 +40,17 @@ const requestedPath = window.location.pathname.replace(/\/+$/, '')
 // on the workspace overview instead of rendering the marketing page.
 const path = requestedPath === '/dashboard.html' ? '/dashboard'
   : requestedPath === '/pricing/index.html' ? '/pricing' : requestedPath
-// /dashboard/demos/library was the demo library's own page. Staging holds
-// the library now, so a link already shared opens the Demos page on Staging
-// instead of a page that is no longer there.
+// /dashboard/demos/library was the demo library's own page. The Demos page
+// opens on the library now, so a link already shared lands there.
 const isLibraryPath = path === '/dashboard/demos/library'
 if (isLibraryPath) {
-  window.history.replaceState(null, '', withMockMode('/dashboard/demos?seg=staging'))
+  window.history.replaceState(null, '', withMockMode('/dashboard/demos'))
+}
+// Campaigns became Flow (2026-09-24). The list page's address opens Flow, so
+// a bookmark lands somewhere real; one campaign's builder keeps its own page.
+const isCampaignsPath = path === '/dashboard/campaigns'
+if (isCampaignsPath) {
+  window.history.replaceState(null, '', withMockMode('/dashboard/flow'))
 }
 const campaignPathMatch = path.match(/^\/dashboard\/campaigns\/([^/]+)$/)
 const triggerPathMatch = path.match(/^\/dashboard\/triggers\/([^/]+)$/)
@@ -65,8 +70,8 @@ const page =
     <WorkspacePage active="demos"><DemosPage /></WorkspacePage>
   ) : path === '/dashboard/metrics' || path === '/dashboard/analytics' ? (
     <WorkspacePage active="metrics"><AnalyticsDashboard /></WorkspacePage>
-  ) : path === '/dashboard/campaigns' ? (
-    <Campaigns />
+  ) : path === '/dashboard/flow' || isCampaignsPath ? (
+    <WorkspacePage active="flow"><Flow /></WorkspacePage>
   ) : campaignPathMatch ? (
     <CampaignBuilder campaignId={decodeURIComponent(campaignPathMatch[1])} />
   ) : path === '/dashboard/triggers' || path === '/dashboard/triggers/new' ? (

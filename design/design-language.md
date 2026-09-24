@@ -236,7 +236,7 @@ on marketing pages and is never a second brand accent.
   mat as you read and stops at its foot, never outside it.
   **On phones, scroll is the selector** (2026-08-10, replacing one day of a
   static card list): hover doesn't exist and invisible hotspots are a broken
-  promise on touch, so the dashboard sticks under the header while the six
+  promise on touch, so the dashboard sticks under the header while the five
   explanations pass beneath it as cards, and the card crossing mid-viewport
   takes the tide ring and lights its widget's ring on the image
   (IntersectionObserver, armed under 52rem only; the grid dissolves to
@@ -376,7 +376,10 @@ The signature. ASCII character sea on 2D canvas — never rendered 3D.
   renders them blank). QA mobile with WebKit + iPhone descriptor, not
   chromium-mobile emulation.
 - Baked assets (hero, review-queue, slack-trace, OG) are screenshots of the
-  mocked dashboard (`?mock=1`). If the mock or dashboard styling changes,
+  mocked dashboard (`?mock=1`). The explore image and its hotspot regions come
+  from `scripts/refresh-dashboard-shot.mjs` (re-shot 2026-09-24 when the
+  overview dropped email capacity and the Campaigns panel); the image's ratio
+  is also `.explore-dash`'s `aspect-ratio`, or the hotspots drift. If the mock or dashboard styling changes,
   RE-SHOOT them in the same commit — a stale bake is a style bug (see the
   black "View all leads" that outlived the button restyle).
 - The compare clip is a Remotion project (`compare-gif/`), rendered with

@@ -36,19 +36,14 @@ import {
   newestOwnActive,
   ownAccount,
 } from "./accounts/model";
-import { listAssets } from "./assets/api";
-import type { CompanyAsset } from "./assets/model";
-import { listAudiences } from "./audiences/api";
-import type { AudienceSummary } from "./audiences/model";
-import { listCampaigns } from "./campaigns/api";
-import type { CampaignSummary } from "./campaigns/model";
+import { getPolicy } from "./approvals/api";
+import { MODE_LABELS, type ApprovalPolicy } from "./approvals/model";
 import AddInboxes from "./dashboard/AddInboxes";
 import AppShell from "./dashboard/AppShell";
 import HelmMark from "./components/HelmMark";
 import {
   DOMAIN_CAP,
   INBOX_CAP,
-  managedInboxCap,
   boughtInboxLine,
   useManagedInboxes,
   type MailboxesOverview,
@@ -59,15 +54,11 @@ import {
 import {
   AssetsIcon,
   AudienceIcon,
-  CampaignIcon,
+  FlowIcon,
   PeopleIcon,
 } from "./dashboard/icons";
 import { withMockMode } from "./mock-mode";
 import { GoogleMark, LoggedOutView, ToastProvider } from "./dashboard/DashboardCommon";
-import {
-  buildOverviewSnapshot,
-  type OverviewSnapshot,
-} from "./dashboard/overview-model";
 import {
   CARD,
   prefetch,
@@ -128,7 +119,7 @@ type AuthState =
 
 /* Every mount-time request fires at module eval, in parallel with /auth/me
    (see prefetch() in dashboard-shared): the summary, the activity feed, and
-   the three inventory lists the campaign desk reads. Each is consumed
+   the approval policy that names Today's sending status. Each is consumed
    exactly once by its loader's initial run; refreshes (e.g. after a CSV
    import) fetch fresh. For logged-out or pending visitors the responses go
    unconsumed — they're cookie-authed, so they carry nothing anyway. */
@@ -138,12 +129,7 @@ const initialSummary = prefetch(() =>
 const initialActivity = prefetch(() =>
   fetch("/api/v1/dashboard/activity?limit=8", { credentials: "include" }),
 );
-const initialInventory = prefetch(() =>
-  Promise.allSettled([listAudiences(), listCampaigns(), listAssets()]),
-);
-/* The pool of sending accounts behind the three cards. The cards paint
-   from the /auth/me booleans first and fill in the rows when this lands. */
-const initialAccounts = prefetch(() => getAccounts());
+const initialPolicy = prefetch(() => getPolicy());
 
 /* /auth/me starts at module eval too — cached identity paints the real
    shell immediately; the background result confirms it, swaps it in place,
@@ -412,12 +398,13 @@ type ActivityState =
   | { status: "error" }
   | { status: "ready"; events: ActivityEvent[] };
 
-type InventoryState = {
-  status: "loading" | "ready";
-  audiences: AudienceSummary[] | null;
-  campaigns: CampaignSummary[] | null;
-  assets: CompanyAsset[] | null;
-};
+/* Who approves outreach. It is what Today's sending calls its status, and
+   it decides whether "Awaiting approval" is a number worth showing: on auto
+   approval nothing ever waits on the customer. */
+type PolicyState =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; policy: ApprovalPolicy };
 
 /* The pool of sending accounts behind ConnectionSetup. Loads alongside the
    summary and never gates the page: the cards paint from the /auth/me
@@ -433,18 +420,9 @@ function ApprovedView({ user }: { user: User }) {
   // control.
   const role = user.org?.role ?? "owner";
   const canWrite = role !== "member";
-  // The managed pool feeds two surfaces: the email tile (count + add flow)
-  // and the quiet capacity line on Today's sending — so it lives here.
-  const { pool } = useManagedInboxes();
   const [summary, setSummary] = useState<SummaryState>({ status: "loading" });
   const [activity, setActivity] = useState<ActivityState>({ status: "loading" });
-  const [inventory, setInventory] = useState<InventoryState>({
-    status: "loading",
-    audiences: null,
-    campaigns: null,
-    assets: null,
-  });
-  const [accounts, setAccounts] = useState<AccountsState>({ status: "loading" });
+  const [policy, setPolicy] = useState<PolicyState>({ status: "loading" });
   const [importsOpen, setImportsOpen] = useState(false);
   const importsRef = useRef<HTMLDetailsElement>(null);
 
@@ -491,60 +469,17 @@ function ApprovedView({ user }: { user: User }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [audiences, campaigns, assets] = await (initialInventory.take() ??
-        Promise.allSettled([listAudiences(), listCampaigns(), listAssets()]));
-      if (cancelled) return;
-      setInventory({
-        status: "ready",
-        audiences: audiences.status === "fulfilled" ? audiences.value : null,
-        campaigns: campaigns.status === "fulfilled" ? campaigns.value : null,
-        assets: assets.status === "fulfilled" ? assets.value : null,
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
       try {
-        const page = await (initialAccounts.take() ?? getAccounts());
-        if (!cancelled) setAccounts({ status: "ready", page });
+        const loaded = await (initialPolicy.take() ?? getPolicy());
+        if (!cancelled) setPolicy({ status: "ready", policy: loaded });
       } catch {
-        // Keep the /auth/me-driven paint; the cards say the list is unavailable.
-        if (!cancelled) setAccounts((prev) => (prev.status === "ready" ? prev : { status: "error" }));
+        if (!cancelled) setPolicy({ status: "error" });
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-
-  // A disconnect answers with the page after the removal, which replaces
-  // the lists in place.
-
-
-  const snapshot = buildOverviewSnapshot(
-    summary.status === "ready" ? summary.summary.pending_reviews : null,
-    {
-      audienceCount: inventory.audiences?.length ?? null,
-      assetCount: inventory.assets?.length ?? null,
-      campaigns: inventory.campaigns,
-    },
-  );
-
-  /* the email channel's daily ceiling — own connected mailbox (20/day)
-     plus what the managed pool carries today. Shown quietly where the
-     dashboard already talks send volume; absent whenever there is no pool
-     (or the fetch failed). "Own mailbox" reads the account pool once it
-     lands, so a disconnect updates the line in place. */
-  const emailConnected =
-    accounts.status === "ready" ? channelConnected(accounts.page.email) : (user.email_connected ?? false);
-  const emailCapLine = pool
-    ? `Up to ${(emailConnected ? 20 : 0) + managedInboxCap(pool.mailboxes)} emails/day`
-    : null;
 
   function openImports() {
     setImportsOpen(true);
@@ -566,10 +501,9 @@ function ApprovedView({ user }: { user: User }) {
       </header>
 
       <div className="overview-heading-links"><a href={withMockMode("/dashboard/settings?tab=accounts")}>Manage sending accounts →</a><a href={withMockMode("/dashboard/metrics")}>Detailed performance →</a></div>
-      <TodaysSending summary={summary} activity={activity} emailCapLine={emailCapLine} />
+      <TodaysSending summary={summary} activity={activity} policy={policy} />
       <MetricsCard state={summary} />
       {canWrite && <QuickActions onImport={openImports} />}
-      <CampaignDesk snapshot={snapshot} inventory={inventory} canWrite={canWrite} />
 
       <details
         className="overview-imports"
@@ -671,37 +605,22 @@ function ConnectionSetup({
 function TodaysSending({
   summary,
   activity,
-  emailCapLine,
+  policy,
 }: {
   summary: SummaryState;
   activity: ActivityState;
-  /** the email channel's daily ceiling (own mailbox + managed pool);
-   *  null when there is no managed pool */
-  emailCapLine: string | null;
+  policy: PolicyState;
 }) {
-  const sending = summary.status === "ready" ? summary.summary.sending : null;
   const emailSending = summary.status === "ready" ? summary.summary.email_sending ?? null : null;
   const pendingReviews = summary.status === "ready" ? summary.summary.pending_reviews : null;
   const queuedSends = summary.status === "ready" ? summary.summary.queued_sends ?? null : null;
-  /* "On track" means approved outreach is actually queued and flowing — not
-     merely "under cap". No queued sends but items waiting on the founder is
-     an approval bottleneck; neither queued nor pending is an empty pipe. */
-  const statusValue = summary.status === "loading"
-    ? "—"
-    : summary.status === "error"
-      ? "Unavailable"
-      : sending?.within_limits === false || emailSending?.within_limits === false
-        ? "Near limit"
-        : sending === null && emailSending === null
-          ? "Setup needed"
-          : queuedSends === null
-            ? "On track"
-            : queuedSends > 0
-              ? "On track"
-              : (pendingReviews ?? 0) > 0
-                ? "Awaiting review"
-                : "Nothing queued";
-  const statusTone = statusValue === "On track" ? "success" : statusValue === "—" || statusValue === "Unavailable" ? undefined : "warning";
+  /* The status is the workspace's approval setting, in the words the
+     Settings page uses for it. "Awaiting approval" only exists where the
+     customer's own team approves: on auto, nothing ever waits on them. */
+  const statusValue = policy.status === "ready"
+    ? MODE_LABELS[policy.policy.mode]
+    : policy.status === "error" ? "Unavailable" : "—";
+  const customerApproves = policy.status === "ready" && policy.policy.mode !== "auto";
   const latestSends = activity.status === "ready"
     ? activity.events.filter((event) => event.kind === "sent").slice(0, 6)
     : [];
@@ -714,21 +633,22 @@ function TodaysSending({
       </div>
       <div className="overview-sending-layout">
         <div className="overview-sending-stats">
-          <SendingStat label="Email capacity remaining" value={summary.status !== "ready" ? "—" : emailSending ? Math.max(0, emailSending.emails_cap - emailSending.emails_sent).toLocaleString() : "Not connected"} />
           <SendingStat label="Outreach queued" value={queuedSends === null ? "—" : queuedSends.toLocaleString()} sub="Across all channels" />
           <SendingStat
             label="Emails sent today"
             value={summary.status !== "ready" ? "—" : emailSending ? emailSending.emails_sent.toLocaleString() : "Not connected"}
-            sub={emailCapLine}
           />
-          <SendingStat
-            label="Awaiting approval"
-            value={pendingReviews === null ? "—" : pendingReviews.toLocaleString()}
-          />
+          {customerApproves && (
+            <SendingStat
+              label="Awaiting approval"
+              value={pendingReviews === null ? "—" : pendingReviews.toLocaleString()}
+            />
+          )}
           <SendingStat
             label="Status"
             value={statusValue}
-            tone={statusTone}
+            tone={policy.status === "ready" ? "status" : undefined}
+            sub={policy.status === "ready" ? <a href={withMockMode("/dashboard/settings?tab=approvals")}>Change</a> : null}
           />
         </div>
         <div className="overview-latest-sends">
@@ -770,10 +690,10 @@ function SendingStat({
 }: {
   label: string;
   value: string;
-  tone?: "success" | "warning";
-  /** quiet context line under the figure (e.g. the email channel's daily
-   *  ceiling when a managed pool exists) */
-  sub?: string | null;
+  /** "status" sets a word, not a figure, at the size the other words use */
+  tone?: "status";
+  /** quiet context line under the figure */
+  sub?: ReactNode;
 }) {
   return (
     <div className="overview-sending-stat">
@@ -794,68 +714,10 @@ function QuickActions({ onImport }: { onImport: () => void }) {
       </div>
       <div className="overview-action-grid">
         <a href={withMockMode("/dashboard/audiences")}><AudienceIcon size={18} /><span>Find leads</span></a>
-        <a href={withMockMode("/dashboard/campaigns/new")}><CampaignIcon size={18} /><span>New campaign</span></a>
+        <a href={withMockMode("/dashboard/flow")}><FlowIcon size={18} /><span>Open flow</span></a>
         <a href={withMockMode("/dashboard/assets")}><AssetsIcon size={18} /><span>Add assets</span></a>
         <button type="button" onClick={onImport}><PeopleIcon size={18} /><span>Import CSV</span></button>
       </div>
-    </section>
-  );
-}
-
-function CampaignDesk({
-  snapshot,
-  inventory,
-  canWrite,
-}: {
-  snapshot: OverviewSnapshot;
-  inventory: InventoryState;
-  canWrite: boolean;
-}) {
-  return (
-    <section className="overview-panel overview-campaign-desk" aria-labelledby="campaign-desk-title">
-      <div className="overview-panel-heading">
-        <h2 id="campaign-desk-title">Campaigns</h2>
-        <a href={withMockMode("/dashboard/campaigns")}>View all</a>
-      </div>
-      {inventory.status === "loading" ? (
-        <div className="overview-campaign-list" role="status" aria-label="Loading campaigns">
-          {[0, 1, 2].map((row) => (
-            <div key={row} className="overview-campaign-skeleton-row" aria-hidden="true">
-              <span className="overview-skeleton" style={{ width: "3.2rem", height: "0.7rem" }} />
-              <span className="overview-skeleton" style={{ width: `${46 - row * 8}%`, height: "0.75rem" }} />
-              <span className="overview-skeleton overview-skeleton-meta" style={{ width: "5.4rem", height: "0.65rem" }} />
-              <span className="overview-skeleton" style={{ width: "2.6rem", height: "0.65rem" }} />
-            </div>
-          ))}
-        </div>
-      ) : inventory.campaigns === null ? (
-        <p className="overview-empty" role="alert">Campaigns are temporarily unavailable.</p>
-      ) : snapshot.recentCampaigns.length === 0 ? (
-        <p className="overview-empty">
-          {canWrite ? (
-            <>
-              No campaigns yet.{" "}
-              <a href={withMockMode("/dashboard/campaigns/new")}>Create your first campaign</a>{" "}
-              to start sending.
-            </>
-          ) : (
-            <>No campaigns yet. An owner or admin can create the first campaign.</>
-          )}
-        </p>
-      ) : (
-        <div className="overview-campaign-list">
-          {snapshot.recentCampaigns.map((campaign) => (
-            <a href={withMockMode(`/dashboard/campaigns/${encodeURIComponent(campaign.id)}`)} key={campaign.id}>
-              <span className={`overview-campaign-status is-${campaign.status}`}>
-                {campaign.status}
-              </span>
-              <strong>{campaign.name}</strong>
-              <small>{campaign.contactCount} leads · {campaign.stepCount} steps</small>
-              <time dateTime={campaign.updatedAt}>{relativeTime(campaign.updatedAt) ?? "Recently"}</time>
-            </a>
-          ))}
-        </div>
-      )}
     </section>
   );
 }

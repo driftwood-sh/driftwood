@@ -148,9 +148,9 @@ async function pass(page,width){
  const portrait=await measure(page,PORTRAIT);
  const landscapeBare=await measure(page,LANDSCAPE_BARE);
  // The Staging frame regression is measured before the explicit tab change.
- // Review emails has its own larger inline images and separate content flow.
+ // Emails to approve has its own larger inline images and separate content flow.
  const shifts=await page.evaluate(()=>window.__shifts ? [...window.__shifts] : null);
- await page.getByRole('button',{name:/^Review emails/}).click();
+ await page.getByRole('button',{name:/^Emails to approve/}).click();
  await clipsSettled(page);
  // Deferred clips must be brought into view before inspecting their metadata.
  await page.locator(`.dp-card[aria-label="${PORTRAIT_EMAIL}"]`).scrollIntoViewIfNeeded();

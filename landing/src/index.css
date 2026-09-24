@@ -907,10 +907,10 @@ html:has(.landing) { font-size: clamp(16px, 0.477vw + 8.8px, 21px); }
 .landing .explore-dash {
   position: relative; border: 1px solid var(--line); border-radius: var(--r-win);
   overflow: hidden; box-shadow: var(--shadow-win); background: #fff;
-  /* reserve the box up front (so the % hotspots line up before the lazy image
-     loads) AND crop the "all leads" strip off the bottom: the box is ~90% of
-     the image's native height and the image is pinned to the top */
-  aspect-ratio: 2048 / 2506;
+  /* reserve the box up front, at the image's own ratio, so the % hotspots
+     line up before the lazy image loads (scripts/refresh-dashboard-shot.mjs
+     prints the ratio with the regions) */
+  aspect-ratio: 2048 / 2024;
 }
 .landing .explore-dash img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
 /* hotspots: invisible until hovered/selected, then a tide wash + inset ring

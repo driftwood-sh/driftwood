@@ -71,8 +71,8 @@ export default function WorkspacePage({
     };
   }, []);
 
-  /* The Demos badge: what waits on the customer, or what is scheduled when
-     Driftwood approves. Read once the viewer is known, so an unauthed page
+  /* The Demos badge: what waits on the customer's own approval, and nothing
+     on auto approval. Read once the viewer is known, so an unauthed page
      load asks for nothing. */
   const demosCount = useDemosNavCount(auth.status === "ready");
 

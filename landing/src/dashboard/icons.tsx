@@ -33,6 +33,11 @@ export function CampaignIcon(props: DashboardIconProps) {
   return <Icon {...props}><path d="M5 5.5h14M5 12h14M5 18.5h9" /><circle cx="3.5" cy="5.5" r=".75" fill="currentColor" stroke="none" /><circle cx="3.5" cy="12" r=".75" fill="currentColor" stroke="none" /><circle cx="3.5" cy="18.5" r=".75" fill="currentColor" stroke="none" /><path d="m17 16 3 2.5-3 2.5z" /></Icon>;
 }
 
+/* The daily flow: three stations joined by one line, left to right. */
+export function FlowIcon(props: DashboardIconProps) {
+  return <Icon {...props}><circle cx="5" cy="7" r="2.25" /><circle cx="12" cy="17" r="2.25" /><circle cx="19" cy="7" r="2.25" /><path d="M6.3 8.9 10.7 15M13.3 15l4.4-6.1" /></Icon>;
+}
+
 /* A standing watch: one point with rings radiating out (design/triggers.html). */
 export function TriggerIcon(props: DashboardIconProps) {
   return <Icon {...props}><circle cx="12" cy="12" r="2.25" /><path d="M8.2 8.2a5.4 5.4 0 0 0 0 7.6M15.8 8.2a5.4 5.4 0 0 1 0 7.6M5.4 5.4a9.3 9.3 0 0 0 0 13.2M18.6 5.4a9.3 9.3 0 0 1 0 13.2" /></Icon>;

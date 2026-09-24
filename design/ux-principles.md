@@ -121,35 +121,76 @@ here in the same commit. Testable rules only; taste lives in the other file.
 - Re-shoot baked assets when dashboard styling changes (design-language.md §7).
 
 
+## The daily flow: Overview, Flow, Audiences, Demos, Inbox (2026-09-24)
+
+A workspace runs one daily flow, not a list of campaigns: find the right
+people, make each of them a demo, write the email that carries it, queue it.
+Each page owns one part of that, and no two pages show the same list.
+
+- **Overview** reports, it does not manage. Today's sending shows Outreach
+  queued, Emails sent today and Status. Status is the workspace's approval
+  setting in the Settings page's own words (Auto, Manual or Hybrid approval)
+  with a Change link. **Awaiting approval** appears only where the customer's
+  own team approves; on auto approval nothing waits on them, so the number is
+  not shown at all. Email capacity is not an overview number.
+- **Flow** replaced Campaigns in the sidebar (`/dashboard/campaigns` opens
+  Flow; one campaign's builder keeps its own page for links from Triggers).
+  Four stations in run order (Audience, Demo, Email, Queue) each state where
+  things stand in one line and link to the page that changes them. Under them,
+  **Going out** lists the next send day's people (the next day with sends, so
+  a Friday shows Monday), grouped by due time in the workspace's time zone,
+  never by `projected_date`, which is deliberately a day pessimistic. Choosing
+  a person shows exactly what they get: their demo and their email. Remove
+  (per row, or a selection) arms then confirms and posts `sends/cancel`, which
+  also tells the agent not to queue them again. Pause all sends lives here.
+- **Audiences** is a list of audiences; opening one is a full page of its
+  people (`?audience=<id>`, so Back and refresh work). Each person carries
+  **Found by**: Lead search, CSV upload, Driftwood or Added by hand. Lead
+  search is the discovery search (rule 18: never the vendor's name). Chips
+  filter by source; a row opens everything on file; **Export CSV** exports
+  exactly the rows shown and never writes a spreadsheet formula.
+- **Demos** opens on **All demos** for everyone: the library, one demo at a
+  time, with Ask for a change. Where the team approves (manual or hybrid),
+  **Demos to approve** and **Emails to approve** sit beside it; on auto
+  approval they are not there. The queue is Flow's and the sent history is
+  Inbox's, so neither is repeated here. Old `?seg=` links still resolve.
+  The sidebar badge counts only what waits on the customer: none on auto.
+- **Inbox** tabs are Queued, Sent, Replies, plus **Needs approval** only
+  where the team approves. A draft in Driftwood's own final check is not the
+  customer's to act on, so it is listed under Queued as "Final check", after
+  the scheduled rows, never as a second queue-shaped tab.
+
 ## Demo and email approvals
 
-- Demos use four stages: **Staging**, **Review emails**, **Queue**, **Sent**.
-  Staging contains demos awaiting approval and approved demos whose recipients
-  and drafts are being prepared. Queue counts only scheduled sends.
+- Where the team approves, the Demos page has two approval views beside the
+  library: **Demos to approve** holds demos awaiting approval and approved
+  demos whose recipients and drafts are being prepared; **Emails to approve**
+  holds drafts. Queue counts only scheduled sends and lives on Flow.
 - **Approve demo** authorizes recipient discovery and drafting. **Approve all
   demos** has the same limited scope, with the existing two-press confirmation.
   It must never also approve pending email reviews.
-- **Review emails** groups drafts by company and shows the recipient name,
+- **Emails to approve** groups drafts by company and shows the recipient name,
   title, email address, subject, full copy, and the linked preview image.
   **Approve email & queue** acts on that displayed email only. After all of a
   company’s full drafts, **Approve N emails & queue** requires confirmation and
   acts only on that company’s displayed, reviewable emails. Multiple drafts
   for one recipient remain separate; unseen copy cannot ride along in a decision.
 - Agent-prepared **send lists** freeze exact email drafts from an explicitly
-  requested generation batch or set of review IDs. In Review emails, choosing
+  requested generation batch or set of review IDs. In Emails to approve, choosing
   a list shows only its recipients, videos, GIFs and full copy. **Approve this
   list** uses the existing two-press confirmation and queues only those pending
   IDs. Older drafts and later generations cannot join the selection. Changed
   recipients/copy, incomplete data, or a different assigned reviewer block the
   batch action. A missing list never falls back to approving the whole queue.
-  `?mock=photon-review-multi&seg=review&send_list=today` demonstrates a two-email
+  `?mock=photon-review-multi&view=approve-emails&send_list=today` demonstrates a two-email
   list within a six-email workspace; approval leaves the four other drafts alone.
 - A missing recipient email disables queueing with an explanation. Asking for
   changes and skipping a recipient remain available. Review settings determine
   the authorized reviewer; the page does not bypass that policy.
 - Contact progress refreshes while the page is visible and when the user
   returns. Blocked discovery keeps its reason and the Add a name action.
-- Offline QA: `?mock=photon-review` has five reviewable emails for one company,
+- Offline QA (add `&approval=auto` or `&approval=manual` to pin the policy):
+  `?mock=photon-review` has five reviewable emails for one company,
   another demo awaiting approval, and a discovery in progress. All addresses
   are fixtures at example.test. `scripts/demos-approve-qa.mjs` proves that demo
   approvals queue no email and a later email approval queues exactly that copy,
@@ -158,7 +199,7 @@ here in the same commit. Testable rules only; taste lives in the other file.
   do not capture this page; no baked marketing asset changes are needed.
 
 - Existing portrait players reserve a 16:9 frame before metadata supplies the
-  actual ratio. Separating Staging from email review brings this single resize
+  actual ratio. Separating demo approval from email review brings this single resize
   into the viewport; clip QA now measures it honestly, requiring the same exact
   ratio, one resize, and incremental CLS below 0.05. Changing the renderer or
   adding dimensions to the media API is outside this approval-flow change.

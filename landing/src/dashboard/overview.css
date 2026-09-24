@@ -328,7 +328,9 @@
 
 .overview-sending-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* three tiles on auto approval, four where the team approves */
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   border: 1px solid var(--color-line);
   border-radius: .7rem;
   overflow: hidden;
@@ -348,7 +350,11 @@
 .overview-sending-stat span { color: var(--color-ink-faint); font-size: .7rem; line-height: 1.35; }
 .overview-sending-stat strong { font-size: 1.3rem; font-weight: 650; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
 .overview-sending-stat strong.is-muted { color: var(--color-ink-faint); font-size: .72rem; letter-spacing: 0; }
-.overview-sending-stat strong.is-success { color: var(--color-ok); font-size: .84rem; letter-spacing: 0; }
+.overview-sending-stat strong.is-status { color: var(--color-ink); font-size: .84rem; letter-spacing: 0; }
+.overview-sending-stat small { display: block; margin-top: .2rem; color: var(--color-ink-faint); font-size: .66rem; }
+.overview-sending-stat small a { color: var(--color-tide); font-weight: 600; text-decoration: none; }
+.overview-sending-stat small a:hover,
+.overview-sending-stat small a:focus-visible { color: var(--color-tide-deep); text-decoration: underline; }
 
 /* needs-attention statuses stay ink; the sanctioned alert dot carries the
    warning (design-language.md §1 — no amber, no second accent family) */
@@ -544,6 +550,7 @@
   .overview-heading { align-items: flex-start; flex-direction: column; gap: .7rem; }
   .overview-sending-stats,
   .overview-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-sending-stats { grid-auto-flow: row; }
   .overview-sending-stat:nth-child(n + 3) { border-top: 1px solid var(--color-line); }
   .overview-sending-stat:nth-child(odd) { border-left: 0; }
 }

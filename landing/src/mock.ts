@@ -667,7 +667,8 @@ if (mockMode) {
         kind: isEmail ? "email" : "message",
         subject: isEmail ? `A working demo for ${company}` : null,
         note: `Hey ${person.split(" ")[0]},\n\nWe put ${company}'s checkout through a pass and filmed what it does on a slow connection. Short clip, real data.\n\nWorth a look?\n\nBest,\nAayush`,
-        attachment_slug: null,
+        /* Each email carries a clip, so Flow's preview has a demo to play. */
+        attachment_slug: isEmail ? clip(["compare.mp4", "case-oruk.mp4", "case-autosana.mp4"][bulkId % 3]) : null,
         lead: lead(person, bulkRoles[bulkId % bulkRoles.length], company),
         status: "pending", error: null, error_class: null,
         due_at: slotAt(day, i),
@@ -721,13 +722,20 @@ if (mockMode) {
   };
   // Bodies may be functions of the request init so POST results can echo the
   // request (e.g. cancel reports how many ids it was sent).
+  /* Cancel takes still-pending rows out of the queue, as the real route
+     does, and reports anything else it was sent as skipped. */
   const cancelSends = (init?: RequestInit) => {
-    let n = 0;
+    let ids: string[] = [];
     try {
       const parsed = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { send_ids?: unknown[] };
-      n = Array.isArray(parsed.send_ids) ? parsed.send_ids.length : 0;
+      ids = Array.isArray(parsed.send_ids) ? parsed.send_ids.filter((id): id is string => typeof id === "string") : [];
     } catch { /* malformed body — report 0 canceled */ }
-    return { canceled: n, skipped: [], agent_woken: true };
+    const pending = new Set(sends.sends.filter((row) => row.status === "pending").map((row) => row.id));
+    const canceled = ids.filter((id) => pending.has(id));
+    sends.sends = sends.sends.filter((row) => !canceled.includes(row.id));
+    sends.total = Math.max(0, sends.total - canceled.length);
+    sends.counts.pending = Math.max(0, sends.counts.pending - canceled.length);
+    return { canceled: canceled.length, skipped: ids.filter((id) => !pending.has(id)), agent_woken: true };
   };
   const dismissSends = (init?: RequestInit) => {
     let n = 0;
@@ -1787,7 +1795,7 @@ if (mockMode) {
     discovery_filters: Record<string, string>; members: Array<{
       lead_id: string; name: string; title: string; company: string;
       email: string | null; linkedin_url: string; stage: string; contactable: boolean;
-      outreach_eligible: boolean;
+      outreach_eligible: boolean; found_by?: string; added_at?: string;
     }>; created_at: string; updated_at: string;
   };
   const audienceSummary = (audience: MockAudience) => ({
@@ -1801,11 +1809,33 @@ if (mockMode) {
     created_at: audience.created_at,
     updated_at: audience.updated_at,
   });
+  /* found_by mirrors the backend's reading of a lead's source and origin. */
   const memberFromLead = (item: MockLead) => ({
     lead_id: item.id, name: item.name, title: item.title, company: item.company,
     email: item.email, linkedin_url: item.linkedin_url, stage: item.stage,
     contactable: true, outreach_eligible: true,
+    found_by: item.source?.startsWith("orange") ? "lead_search" : item.origin === "uploaded" ? "upload" : "agent",
+    added_at: hoursAgo(70),
   });
+  /* A list is worth reading at a dozen people, not three: the QA audience
+     carries more lead-search finds plus a handful someone uploaded. */
+  const extraQaMembers = [
+    ["Talia Morgan", "VP Quality", "Proofline", "lead_search"],
+    ["Ravi Menon", "Director of Engineering", "SignalNest", "lead_search"],
+    ["Elena Park", "Founder", "Releasewise", "lead_search"],
+    ["Marcus Hale", "Head of QA", "Tidewater", "lead_search"],
+    ["Riley Chen", "Cofounder", "Anchorpoint", "upload"],
+    ["Owen Brooks", "Engineering director", "Juniper Systems", "upload"],
+    ["Ines Duarte", "Product lead", "Relayworks", "agent"],
+    ["Sam Okafor", "CTO", "Ledgerline", "lead_search"],
+  ].map(([name, title, company, foundBy], index) => ({
+    lead_id: `qa-extra-${index + 1}`, name, title, company,
+    email: foundBy === "lead_search" && index % 3 === 2 ? null : `${name.toLowerCase().replace(/\s+/g, ".")}@example.test`,
+    linkedin_url: `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, "-")}`,
+    stage: index % 2 ? "demo_built" : "new",
+    contactable: true, outreach_eligible: index !== 5,
+    found_by: foundBy, added_at: hoursAgo(20 + index * 7),
+  }));
   const mockAudiences: MockAudience[] = [{
     id: "audience-qualified-qa",
     name: "Qualified QA leaders",
@@ -1813,7 +1843,7 @@ if (mockMode) {
     description: "QA and operations leaders at teams with a live release workflow.",
     source_provider: "orange_slice",
     discovery_filters: { prompt: "QA and operations leaders at teams with a live release workflow" },
-    members: mockLeads.slice(0, 3).map(memberFromLead),
+    members: [...mockLeads.slice(0, 3).map(memberFromLead), ...extraQaMembers],
     created_at: hoursAgo(72),
     updated_at: hoursAgo(2),
   }, {

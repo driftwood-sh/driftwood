@@ -1,0 +1,427 @@
+/* /dashboard/flow — the four stations of the daily flow, then the queue with
+   one person's demo and email beside it. Tokens and the button system are
+   the dashboard's own (design-language.md §1, §3). */
+
+.flow-page {
+  width: min(100%, 82rem);
+  margin: 0 auto;
+  padding-bottom: 4.5rem;
+  color: var(--color-ink);
+}
+
+.flow-heading h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3.6vw, 2.25rem);
+  font-weight: 620;
+  letter-spacing: -0.028em;
+}
+
+.flow-heading p {
+  margin: 0.35rem 0 0;
+  color: var(--color-ink-soft);
+  font-size: 0.85rem;
+}
+
+/* ---------- the four stations ---------- */
+
+.flow-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-step {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.9rem;
+  background: var(--color-surface);
+  padding: 0.95rem 1rem 0.9rem;
+}
+
+/* The line that joins one station to the next: the flow runs left to
+   right, so each card points at the one after it. */
+.flow-step + .flow-step::before {
+  position: absolute;
+  top: 1.55rem;
+  left: -0.75rem;
+  width: 0.75rem;
+  height: 1px;
+  background: var(--color-tide);
+  content: "";
+}
+
+.flow-step-head { display: flex; align-items: center; gap: 0.5rem; }
+
+.flow-step-n {
+  display: inline-grid;
+  flex: none;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-tide-wash);
+  color: var(--color-tide);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-step h2 {
+  margin: 0;
+  color: var(--color-ink-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.flow-step-value {
+  margin: 0.45rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-step-sub {
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-ink-soft);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-step-link {
+  align-self: flex-start;
+  margin-top: 0.55rem;
+  color: var(--color-tide);
+  font-size: 0.78rem;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.flow-step-link:hover,
+.flow-step-link:focus-visible { color: var(--color-tide-deep); text-decoration: underline; }
+
+/* ---------- the queue ---------- */
+
+.flow-queue { margin-top: 2rem; scroll-margin-top: 1.5rem; }
+
+.flow-queue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.flow-queue-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.flow-queue-head .flow-quiet { margin-left: auto; }
+
+.flow-days {
+  display: inline-flex;
+  gap: 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  padding: 0.2rem;
+}
+
+.flow-days button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  padding: 0.25rem 0.8rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.flow-days button span {
+  color: var(--color-ink-faint);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-days button[aria-pressed="true"] { background: var(--color-tide-wash); color: var(--color-tide-deep); }
+.flow-days button[aria-pressed="true"] span { color: var(--color-tide); }
+
+.flow-queue-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  align-items: start;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.flow-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 0.9rem;
+  background: var(--color-surface);
+  list-style: none;
+}
+
+.flow-list > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.55rem 0.85rem;
+}
+
+.flow-list > li + li { border-top: 1px solid var(--color-line); }
+.flow-list > li.is-selected { background: var(--color-tide-wash); box-shadow: inset 3px 0 var(--color-tide); }
+.flow-list > li.is-picked:not(.is-selected) { background: color-mix(in srgb, var(--color-tide-wash) 55%, var(--color-surface)); }
+
+/* A reader without write access has no checkbox or Remove, so the name
+   takes the first column. */
+.flow-list > li:not(:has(.flow-check)) { grid-template-columns: minmax(0, 1fr) auto; }
+
+.flow-check { width: 1rem; height: 1rem; margin: 0; accent-color: var(--color-tide); }
+
+.flow-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-row strong { font-size: 0.85rem; font-weight: 620; }
+
+.flow-row span {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-ink-soft);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-row:hover strong,
+.flow-row:focus-visible strong { color: var(--color-tide-deep); }
+
+.flow-row-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--color-ink);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.flow-row-when small { color: var(--color-ink-faint); font-size: 0.7rem; }
+
+.flow-row-error { grid-column: 1 / -1; }
+
+/* ---------- one person's demo and email ---------- */
+
+.flow-preview {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.9rem;
+  background: var(--color-surface);
+  padding: 1rem 1.1rem 1.15rem;
+  scroll-margin-top: 1rem;
+}
+
+.flow-preview header { display: flex; flex-direction: column; gap: 0.15rem; }
+.flow-preview header strong { font-size: 0.95rem; font-weight: 650; }
+.flow-preview header span { color: var(--color-ink-soft); font-size: 0.78rem; overflow-wrap: anywhere; }
+
+.flow-preview-part h3 {
+  margin: 0 0 0.5rem;
+  color: var(--color-ink-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.flow-clip {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.6rem;
+  background: #0f1720;
+  object-fit: contain;
+}
+
+.flow-clip-out {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.flow-note {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 0.86rem;
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- controls ---------- */
+
+.flow-btn {
+  display: inline-flex;
+  min-height: 2.2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  padding: 0.38rem 0.95rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 620;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 200ms cubic-bezier(0.2, 0, 0, 1), color 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.flow-btn:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+.flow-btn.is-armed { border-color: var(--color-alert); color: var(--color-alert); }
+
+/* Tertiary (design-language.md §3): quiet text for a control that repeats
+   down a list. */
+.flow-quiet {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-soft);
+  padding: 0.25rem 0.35rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 560;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flow-quiet:hover { color: var(--color-ink); }
+.flow-quiet.is-armed { color: var(--color-alert); font-weight: 620; }
+
+.flow-btn:disabled,
+.flow-quiet:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.flow-selbar {
+  position: sticky;
+  z-index: 2;
+  top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  margin-top: 0.9rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.9rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-win-sm);
+  padding: 0.55rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+.flow-error { margin: 0.5rem 0 0; color: var(--color-alert); font-size: 0.78rem; }
+.flow-selbar .flow-error { margin: 0; }
+
+.flow-empty {
+  margin-top: 1rem;
+  border: 1px dashed var(--color-line);
+  border-radius: 0.9rem;
+  padding: 2rem 1.25rem;
+  color: var(--color-ink-soft);
+  font-size: 0.86rem;
+  text-align: center;
+}
+
+.flow-empty p { margin: 0 0 1rem; }
+
+.flow-later { margin: 0.9rem 0 0; color: var(--color-ink-soft); font-size: 0.8rem; }
+.flow-later a { color: var(--color-tide); font-weight: 600; text-decoration: none; }
+.flow-later a:hover,
+.flow-later a:focus-visible { color: var(--color-tide-deep); text-decoration: underline; }
+
+/* ---------- loading ---------- */
+
+.flow-skel {
+  display: block;
+  border-radius: 0.35rem;
+  background: var(--color-line);
+  animation: flow-pulse 1.7s ease-in-out infinite;
+}
+
+.flow-skel-value { width: 60%; height: 1.05rem; margin-top: 0.3rem; }
+.flow-skel-sub { width: 80%; height: 0.72rem; margin-top: 0.45rem; }
+.flow-skel-row { display: flex !important; justify-content: space-between; padding: 0.95rem 0.85rem !important; }
+.flow-skel-name { width: 45%; height: 0.8rem; }
+.flow-skel-time { width: 3.5rem; height: 0.8rem; }
+.flow-skel-block { width: 100%; height: 14rem; margin-top: 0.8rem; }
+
+@keyframes flow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-skel { animation: none; }
+  .flow-btn { transition: none; }
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 960px) {
+  .flow-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* In two rows the joining line only reads inside a row. */
+  .flow-step:nth-child(3)::before { display: none; }
+}
+
+@media (max-width: 900px) {
+  .flow-queue-body { grid-template-columns: 1fr; }
+  .flow-preview { position: static; }
+}
+
+@media (max-width: 560px) {
+  .flow-steps { grid-template-columns: 1fr; gap: 0.5rem; }
+  .flow-step { padding: 0.7rem 0.85rem; }
+  .flow-step-link { margin-top: 0.35rem; }
+  .flow-step + .flow-step::before { top: -0.5rem; left: 1.57rem; width: 1px; height: 0.5rem; }
+  .flow-step:nth-child(3)::before { display: block; }
+  .flow-queue-head .flow-quiet { margin-left: 0; }
+  .flow-list > li { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .flow-row-remove { grid-column: 2 / -1; justify-self: start; padding-left: 0; }
+}

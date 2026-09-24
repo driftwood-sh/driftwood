@@ -7,13 +7,13 @@ import {
   AudienceIcon,
   CampaignIcon,
   CloseIcon,
+  FlowIcon,
   CompaniesIcon,
   LogoutIcon,
   MenuIcon,
   MetricsIcon,
   OverviewIcon,
   PeopleIcon,
-  PlusIcon,
   ReviewIcon,
   SearchVisibilityIcon,
   SettingsIcon,
@@ -62,6 +62,7 @@ const ICONS: Record<DashboardIconName, (props: DashboardIconProps) => ReactNode>
   overview: OverviewIcon,
   audience: AudienceIcon,
   campaign: CampaignIcon,
+  flow: FlowIcon,
   demo: VideoIcon,
   trigger: TriggerIcon,
   metrics: MetricsIcon,
@@ -206,11 +207,9 @@ export default function AppShell({
         </div>
         {mode === "admin" ? (
           <div className="app-sidebar-context"><span>Driftwood</span><strong>Admin panel</strong></div>
-        ) : canWrite ? (
-          <a className="app-sidebar-create" href={withMockMode("/dashboard/campaigns/new")}><PlusIcon size={16} />New campaign</a>
-        ) : (
+        ) : !canWrite ? (
           <div className="app-sidebar-context"><span>Workspace access</span><strong>Read only</strong></div>
-        )}
+        ) : null}
         <Navigation active={active} mode={mode} counts={navCounts} />
         <div className="app-sidebar-footer">
           {mode === "customer" && <a href={withMockMode("/dashboard/settings")} className={`app-sidebar-link ${active === "settings" ? "is-active" : ""}`} aria-current={active === "settings" ? "page" : undefined}><SettingsIcon size={17} /><span>Settings</span></a>}

@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  csvFilename,
+  FOUND_BY_LABELS,
   filterAudiences,
+  filterMembers,
+  foundByCounts,
+  memberFoundBy,
+  membersCsv,
   outreachEligibleMembers,
   providerLabel,
   summarizeLeadImport,
@@ -188,4 +194,63 @@ test("provider slugs render as capability labels, never vendor names", () => {
   assert.equal(providerLabel("workspace"), "Workspace");
   // An unrecognized slug must never title-case a vendor name into the UI.
   assert.equal(providerLabel("some_new_vendor"), "Imported");
+});
+
+const MEMBER = {
+  leadId: "l1",
+  name: "Dana Whitfield",
+  title: "VP Ops",
+  company: "Meridian",
+  email: "dana@meridian.test",
+  linkedinUrl: "https://www.linkedin.com/in/dana",
+  stage: "demo_built",
+  contactable: true,
+  outreachEligible: true,
+};
+
+test("a member's source is its own, else the audience's, else unknown", () => {
+  assert.equal(memberFoundBy({ ...MEMBER, foundBy: "agent" }, { sourceProvider: "orange_slice" }), "agent");
+  assert.equal(memberFoundBy(MEMBER, { sourceProvider: "orange_slice" }), "lead_search");
+  assert.equal(memberFoundBy(MEMBER, { sourceProvider: "csv_upload" }), "upload");
+  assert.equal(memberFoundBy(MEMBER, { sourceProvider: "workspace" }), null);
+  assert.equal(FOUND_BY_LABELS.lead_search, "Lead search");
+});
+
+test("source chips count each source, largest first, after All", () => {
+  const members = [
+    { ...MEMBER, leadId: "a", foundBy: "lead_search" as const },
+    { ...MEMBER, leadId: "b", foundBy: "lead_search" as const },
+    { ...MEMBER, leadId: "c", foundBy: "upload" as const },
+  ];
+  assert.deepEqual(foundByCounts(members, { sourceProvider: "workspace" }), [
+    { id: "all", label: "All", count: 3 },
+    { id: "lead_search", label: "Lead search", count: 2 },
+    { id: "upload", label: "CSV upload", count: 1 },
+  ]);
+  assert.deepEqual(
+    filterMembers(members, { sourceProvider: "workspace" }, "upload", "").map((m) => m.leadId),
+    ["c"],
+  );
+  assert.deepEqual(
+    filterMembers(members, { sourceProvider: "workspace" }, "all", "  MERIDIAN ").length,
+    3,
+  );
+});
+
+test("the CSV export quotes what needs quoting and never writes a formula", () => {
+  const csv = membersCsv(
+    [
+      { ...MEMBER, foundBy: "lead_search", addedAt: "2026-09-20T12:00:00Z" },
+      { ...MEMBER, leadId: "l2", name: "=HYPERLINK(\"x\")", title: "Role not set", company: "Acme, Inc.", email: "Email not set", linkedinUrl: null },
+    ],
+    { sourceProvider: "csv_upload" },
+  );
+  assert.equal(
+    csv,
+    "Name,Title,Company,Email,LinkedIn,Stage,Found by,Added\r\n" +
+      "Dana Whitfield,VP Ops,Meridian,dana@meridian.test,https://www.linkedin.com/in/dana,Demo Built,Lead search,2026-09-20\r\n" +
+      "\"'=HYPERLINK(\"\"x\"\")\",,\"Acme, Inc.\",,,Demo Built,CSV upload,\r\n",
+  );
+  assert.equal(csvFilename("Qualified QA leaders!"), "qualified-qa-leaders.csv");
+  assert.equal(csvFilename("  "), "audience.csv");
 });

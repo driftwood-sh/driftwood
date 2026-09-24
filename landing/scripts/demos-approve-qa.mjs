@@ -39,7 +39,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await instrument(page);
 
-  await page.goto(`${base}/dashboard/demos?mock=demos-approval`);
+  await page.goto(`${base}/dashboard/demos?mock=demos-approval&view=approve-demos`);
   await page.locator('.dp-card').nth(59).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Approve demo', exact: true }).count(), 60);
   assert.equal(await page.locator('.dp-approved tbody tr').count(), 4);
@@ -53,10 +53,8 @@ try {
   assert.equal(await page.locator('.dp-card').count(), 0);
   assert.equal(await page.locator('.dp-approved tbody tr').count(), 64);
   assert.equal((await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide')).length, 0);
-  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
-  await page.getByText('Nothing queued yet.', { exact: true }).waitFor();
-  assert.equal(await page.locator('.dp-approved').count(), 0, 'discovery is never presented as queued mail');
-  await page.getByRole('button', { name: /^Staging/ }).click();
+  // The queue lives on Flow now; Demos offers only the library and the two approval views.
+  assert.deepEqual(await page.locator('.dp-segments button').evaluateAll(buttons => buttons.map(button => button.firstChild.textContent)), ['All demos', 'Demos to approve', 'Emails to approve']);
   const bloom = page.locator('.dp-approved tbody tr').filter({ hasText: 'No one found at Bloom.' });
   await bloom.getByRole('button', { name: 'Add a name' }).click();
   await bloom.getByRole('textbox').fill('Ada Lovelace');
@@ -64,7 +62,7 @@ try {
   await page.getByText('Ada Lovelace added.', { exact: true }).waitFor();
   await page.screenshot({ path: `${shots}/discovery-desktop.png` });
 
-  await page.goto(`${base}/dashboard/demos?mock=photon-review-multi`);
+  await page.goto(`${base}/dashboard/demos?mock=photon-review-multi&view=approve-emails`);
   await page.locator('.dp-email-group .dp-card').nth(4).waitFor();
   assert.equal(await page.locator('.dp-email-group').count(), 2);
   await page.getByRole('heading', { name: 'Meridian 5 emails to review' }).waitFor();
@@ -77,23 +75,20 @@ try {
   await page.screenshot({ path: `${shots}/email-review-desktop.png` });
 
   // A demo can be approved while reviewed emails exist, without approving them.
-  await page.getByRole('button', { name: /^Staging/ }).click();
+  await page.getByRole('button', { name: /^Demos to approve/ }).click();
   await page.getByRole('button', { name: 'Approve demo', exact: true }).click();
   await page.getByText('Demo approved. Recipients and emails will be prepared for your review.', { exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide')).length, 0);
-  await page.getByRole('button', { name: /^Review emails/ }).click();
+  await page.getByRole('button', { name: /^Emails to approve/ }).click();
   assert.equal(await page.locator('.dp-email-group .dp-card').count(), 6);
   await dana.getByRole('button', { name: 'Approve email & queue', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dp-email-group .dp-card').length === 5);
   const writes = (await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide'));
   assert.equal(writes.length, 1);
   assert.deepEqual(JSON.parse(writes[0].body), [{ item_id: 'photon-email-1', decision: 'approve' }]);
-  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
-  await page.getByText('Dana Whitfield', { exact: false }).waitFor();
-  assert.equal(await page.locator('.dp-table tbody tr').count(), 1);
   await page.screenshot({ path: `${shots}/queued-desktop.png` });
   // Company approval follows all four complete bodies and excludes Juniper.
-  await page.getByRole('button', { name: /^Review emails/ }).click();
+  await page.getByRole('button', { name: /^Emails to approve/ }).click();
   const meridian = page.getByRole('region', { name: 'Meridian email review', exact: true });
   assert.equal(await meridian.locator('.dp-card').count(), 4);
   await meridian.getByRole('button', { name: 'Approve 4 emails & queue', exact: true }).click();
@@ -105,8 +100,6 @@ try {
   const batchWrites = (await page.evaluate(() => window.__writes)).filter(row => row.url.includes('/reviews/decide'));
   assert.deepEqual(JSON.parse(batchWrites[1].body).map(row => row.item_id).sort(), ['photon-email-2', 'photon-email-3', 'photon-email-4', 'photon-email-5']);
   await page.getByRole('article', { name: 'Owen Brooks, Juniper', exact: true }).waitFor();
-  await page.locator('.dp-segments').getByRole('button', { name: /^Queue/ }).click();
-  assert.equal(await page.locator('.dp-table tbody tr').count(), 5);
 
   assert.deepEqual(errors, []);
   console.log('Desktop: 60 demo approvals queue zero emails; discovery and contacts stay visible; five recipient copies with clickable preview; one email approval queues exactly one send; company approval queues only its four remaining reviewed emails.');
@@ -120,9 +113,9 @@ try {
   await page.locator('.dp-email-group .dp-card').nth(4).waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await page.screenshot({ path: `${shots}/email-review-mobile.png` });
-  await page.getByRole('button', { name: /^Staging/ }).click();
+  await page.getByRole('button', { name: /^Demos to approve/ }).click();
   await page.locator('.dp-approved').waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await page.screenshot({ path: `${shots}/discovery-mobile.png` });
-  console.log('iPhone WebKit: all four tabs, recipient address, email preview, and discovery fit without horizontal page overflow.');
+  console.log('iPhone WebKit: both approval views, recipient address, email preview, and discovery fit without horizontal page overflow.');
 } finally { await mobile.close(); }

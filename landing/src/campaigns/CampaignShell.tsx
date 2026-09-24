@@ -14,7 +14,10 @@ export default function CampaignShell({
   children,
   workspace = false,
 }: CampaignShellProps) {
-  const shellSection: DashboardSection = active === "people" ? "leads" : active;
+  /* The builder survives for links from Triggers and older bookmarks; it
+     sits under Flow in the sidebar, which is what replaced Campaigns. */
+  const shellSection: DashboardSection =
+    active === "people" ? "leads" : active === "campaigns" ? "flow" : active;
   return (
     <WorkspacePage
       active={shellSection}
