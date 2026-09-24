@@ -9,7 +9,7 @@
    the same with its reason, and keeps Edit open, because changing the
    sentence is the way out. */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getTrigger, pauseTrigger, resumeTrigger, runTrigger, TriggerApiError } from "./api";
 import TriggerForm from "./TriggerForm";
 import {
@@ -206,10 +206,19 @@ export default function TriggerDetail({ triggerId }: { triggerId: string }) {
   }, [load]);
 
   /* The list page hands off here right after a create; the toast belongs on
-     the page the customer lands on. */
+     the page the customer lands on. The param is stripped on mount, but the
+     toast waits for the first load to settle: a trigger that fails to load
+     (a 404 reads "Trigger not found") was not visibly created, so the flag
+     is dropped instead. */
+  const createdPending = useRef(false);
   useEffect(() => {
-    if (takeCreatedFlag()) toast("Trigger created.", "success");
-  }, [toast]);
+    if (takeCreatedFlag()) createdPending.current = true;
+  }, []);
+  useEffect(() => {
+    if (!createdPending.current || state.status === "loading") return;
+    createdPending.current = false;
+    if (state.status === "ready") toast("Trigger created.", "success");
+  }, [state.status, toast]);
 
   const openRun = state.status === "ready" && runIsOpen(state.detail.runs[0]?.state);
   const building = state.status === "ready" && triggerView(state.detail.trigger) === "building";

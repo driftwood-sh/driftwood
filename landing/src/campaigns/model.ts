@@ -130,17 +130,20 @@ export function createStep(kind: StepKind): CampaignStep {
   };
 }
 
+// Inserts `step` directly before `beforeStepId`. The builder's connector "+"
+// sits above a step and reads "Add step before <label>", so the anchor is the
+// step below the gap. No anchor, or an unknown one, appends at the end.
 export function insertStep(
   campaign: Campaign,
   step: CampaignStep,
-  afterStepId?: string,
+  beforeStepId?: string,
 ): Campaign {
   const steps = [...campaign.steps];
-  const afterIndex = afterStepId
-    ? steps.findIndex((candidate) => candidate.id === afterStepId)
+  const beforeIndex = beforeStepId
+    ? steps.findIndex((candidate) => candidate.id === beforeStepId)
     : -1;
-  const index = afterIndex >= 0 ? afterIndex + 1 : steps.length;
-  steps.splice(Math.max(0, index), 0, step);
+  const index = beforeIndex >= 0 ? beforeIndex : steps.length;
+  steps.splice(index, 0, step);
   return touchCampaign(campaign, { steps });
 }
 

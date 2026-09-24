@@ -56,7 +56,7 @@ function campaignFixture(): Campaign {
 test("sequence steps can be inserted, reordered, edited, and removed", () => {
   const campaign = campaignFixture();
   const added = createStep("linkedin-message");
-  const inserted = insertStep(campaign, added, campaign.steps[0].id);
+  const inserted = insertStep(campaign, added, campaign.steps[1].id);
 
   assert.equal(inserted.steps[1].id, added.id);
 
@@ -72,6 +72,36 @@ test("sequence steps can be inserted, reordered, edited, and removed", () => {
 
   const removed = removeStep(moved, added.id);
   assert.equal(removed.steps.some((step) => step.id === added.id), false);
+});
+
+test("a connector + inserts the step directly before its anchor step", () => {
+  const campaign = campaignFixture();
+  const [email, wait] = campaign.steps;
+
+  // The first connector sits between the audience card and step 1.
+  const first = createStep("demo");
+  assert.deepEqual(
+    insertStep(campaign, first, email.id).steps.map((step) => step.id),
+    [first.id, email.id, wait.id],
+  );
+
+  // The connector above Wait puts the step between Email and Wait.
+  const middle = createStep("demo");
+  assert.deepEqual(
+    insertStep(campaign, middle, wait.id).steps.map((step) => step.id),
+    [email.id, middle.id, wait.id],
+  );
+});
+
+test("no insertion anchor appends the step at the end", () => {
+  const campaign = campaignFixture();
+  const [email, wait] = campaign.steps;
+  const added = createStep("demo");
+
+  assert.deepEqual(
+    insertStep(campaign, added).steps.map((step) => step.id),
+    [email.id, wait.id, added.id],
+  );
 });
 
 test("an unknown insertion anchor safely appends the step", () => {
