@@ -87,7 +87,8 @@ function CampaignBuilderWorkspace({ campaignId }: { campaignId: string }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const campaignRef = useRef<Campaign | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [addAfterStepId, setAddAfterStepId] = useState<string | null | undefined>(undefined);
+  // undefined = dialog closed, null = append, string = insert before that step.
+  const [addBeforeStepId, setAddBeforeStepId] = useState<string | null | undefined>(undefined);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewMode, setReviewMode] = useState<"activate" | "resume">("activate");
   const [overlap, setOverlap] = useState<CampaignOverlap | null>(null);
@@ -236,10 +237,10 @@ function CampaignBuilderWorkspace({ campaignId }: { campaignId: string }) {
     const current = campaignRef.current;
     if (!current) return;
     const step = createStep(kind);
-    const next = insertStep(current, step, addAfterStepId ?? undefined);
+    const next = insertStep(current, step, addBeforeStepId ?? undefined);
     commit(next);
     setSelectedStepId(step.id);
-    setAddAfterStepId(undefined);
+    setAddBeforeStepId(undefined);
     setMobilePanel("editor");
     pushToast(`${step.label} added to the sequence.`, "success");
   }
@@ -552,7 +553,7 @@ function CampaignBuilderWorkspace({ campaignId }: { campaignId: string }) {
               <small>{campaign.steps.length} steps · persisted version {campaign.version}</small>
             </div>
             {editable && (
-              <button className="campaign-secondary campaign-compact-button" type="button" onClick={() => setAddAfterStepId(null)}>
+              <button className="campaign-secondary campaign-compact-button" type="button" onClick={() => setAddBeforeStepId(null)}>
                 <PlusIcon size={15} /> Add step
               </button>
             )}
@@ -591,12 +592,12 @@ function CampaignBuilderWorkspace({ campaignId }: { campaignId: string }) {
                   setMobilePanel("editor");
                 }}
                 onMove={(direction) => handleMove(step.id, direction)}
-                onAdd={() => setAddAfterStepId(step.id)}
+                onAdd={() => setAddBeforeStepId(step.id)}
               />
             ))}
 
             {editable && (
-              <button className="campaign-flow-add-final" type="button" onClick={() => setAddAfterStepId(campaign.steps.at(-1)?.id ?? null)}>
+              <button className="campaign-flow-add-final" type="button" onClick={() => setAddBeforeStepId(null)}>
                 <PlusIcon size={16} />
                 Add another step
               </button>
@@ -623,8 +624,8 @@ function CampaignBuilderWorkspace({ campaignId }: { campaignId: string }) {
         </aside>
       </div>
 
-      {addAfterStepId !== undefined && editable && (
-        <AddStepDialog onClose={() => setAddAfterStepId(undefined)} onAdd={addStep} />
+      {addBeforeStepId !== undefined && editable && (
+        <AddStepDialog onClose={() => setAddBeforeStepId(undefined)} onAdd={addStep} />
       )}
 
       {reviewOpen && (reviewMode === "resume" ? canWrite && campaign.status === "paused" : editable) && (
