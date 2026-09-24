@@ -1,5 +1,5 @@
 import { getPolicy, approveItems } from '../approvals/api';
-import type { ApprovalPolicy } from '../approvals/model';
+import { driftwoodApproves, type ApprovalPolicy } from '../approvals/model';
 import { useWorkspacePermissions } from '../dashboard/workspace-permissions-context';
 import '../approvals/approvals.css';
 import { useEffect, useState } from 'react';
@@ -55,7 +55,7 @@ export default function Inbox() {
   });
   return () => controller.abort();
  },[range,request]);
- const customerApproves = policy !== null && policy.mode !== 'auto';
+ const customerApproves = policy !== null && !driftwoodApproves(policy.mode);
  const FILTERS = ALL_FILTERS.filter(([value]) => value !== 'pending' || customerApproves);
  /* A link to Needs approval on a workspace without it lands on Queued. */
  const filter: InboxFilter = chosenFilter === 'pending' && !customerApproves ? 'queued' : chosenFilter;

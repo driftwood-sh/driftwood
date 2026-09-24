@@ -37,7 +37,7 @@ import {
   ownAccount,
 } from "./accounts/model";
 import { getPolicy } from "./approvals/api";
-import { MODE_LABELS, type ApprovalPolicy } from "./approvals/model";
+import { MODE_LABELS, driftwoodApproves, type ApprovalPolicy } from "./approvals/model";
 import AddInboxes from "./dashboard/AddInboxes";
 import AppShell from "./dashboard/AppShell";
 import HelmMark from "./components/HelmMark";
@@ -616,11 +616,12 @@ function TodaysSending({
   const queuedSends = summary.status === "ready" ? summary.summary.queued_sends ?? null : null;
   /* The status is the workspace's approval setting, in the words the
      Settings page uses for it. "Awaiting approval" only exists where the
-     customer's own team approves: on auto, nothing ever waits on them. */
+     customer's own team approves: on auto and autopilot, nothing ever waits
+     on them. */
   const statusValue = policy.status === "ready"
     ? MODE_LABELS[policy.policy.mode]
     : policy.status === "error" ? "Unavailable" : "—";
-  const customerApproves = policy.status === "ready" && policy.policy.mode !== "auto";
+  const customerApproves = policy.status === "ready" && !driftwoodApproves(policy.policy.mode);
   const latestSends = activity.status === "ready"
     ? activity.events.filter((event) => event.kind === "sent").slice(0, 6)
     : [];

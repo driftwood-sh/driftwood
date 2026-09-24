@@ -11,6 +11,7 @@
    opening the page costs no extra request. */
 
 import { useEffect, useState } from "react";
+import { driftwoodApproves } from "../approvals/model";
 import { approvalPolicy, fetchReviewsPage, firstReviewsPage } from "./staging-api";
 import { groupStagedDemos, readyForYou } from "./staging-model";
 
@@ -24,7 +25,7 @@ export function announceDemosCountChanged() {
 
 export async function demosNavCount(fresh = false): Promise<number> {
   const policy = await approvalPolicy();
-  if (policy.mode === "auto") return 0;
+  if (driftwoodApproves(policy.mode)) return 0;
   const page = await (fresh ? fetchReviewsPage(0) : firstReviewsPage());
   return readyForYou(groupStagedDemos(page.pending)).length;
 }

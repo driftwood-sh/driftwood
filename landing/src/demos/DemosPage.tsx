@@ -3,6 +3,7 @@ import { withMockMode } from "../mock-mode";
 import DemoApprovals, { type ApprovalCounts, type ApprovalView } from "./DemoApprovals";
 import DemoLibrary from "./DemoLibrary";
 import { demosNavCount } from "./nav-count";
+import { driftwoodApproves } from "../approvals/model";
 import { approvalPolicy } from "./staging-api";
 import "./demos-page.css";
 
@@ -61,8 +62,8 @@ export default function DemosPage() {
     approvalPolicy().then(
       (policy) => {
         if (!live) return;
-        setCustomerApproves(policy.mode !== "auto");
-        if (policy.mode === "auto") return;
+        setCustomerApproves(!driftwoodApproves(policy.mode));
+        if (driftwoodApproves(policy.mode)) return;
         /* The sidebar's number, so the switch and the badge agree before an
            approval view has loaded its own lists. */
         demosNavCount().then(
