@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { EmailPreview } from "../EmailPreview";
+import { driftwoodApproves } from "../approvals/model";
 import { approveDemoSendList, fetchDemoSendList, fetchDemoSendLists } from "./staging-api";
 import { pendingListItems, sendListBlock, type DemoSendList, type DemoSendListDetail } from "./send-list-model";
 import { fetchInWaves, useToast } from "../dashboard-shared";
@@ -342,7 +343,7 @@ export default function DemoApprovals({
       await Promise.all([loadStaging(false), loadLibrary(false), loadQueue(false)]);
     })();
     let live = true;
-    approvalPolicy().then((policy) => { if (live) setAutoApproved(policy.mode === "auto"); }, () => {});
+    approvalPolicy().then((policy) => { if (live) setAutoApproved(driftwoodApproves(policy.mode)); }, () => {});
     return () => {
       live = false;
     };

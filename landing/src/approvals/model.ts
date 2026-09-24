@@ -1,8 +1,20 @@
-export type ApprovalMode = 'auto' | 'manual' | 'hybrid';
+export type ApprovalMode = 'auto' | 'manual' | 'hybrid' | 'autopilot';
 export type Reviewer = 'customer' | 'driftwood';
-export type ApprovalPolicy = { mode: ApprovalMode; campaign_reviewers: Record<string, Reviewer>; version: number };
-export const MODE_LABELS: Record<ApprovalMode,string> = { auto:'Auto approval', manual:'Manual approval', hybrid:'Hybrid approval' };
-export const MODE_DESCRIPTIONS: Record<ApprovalMode,string> = { auto:'Driftwood reviews and approves messages in our dashboard before they enter the sending queue.', manual:'Your workspace owners and admins review and approve messages in Pending before they enter the sending queue.', hybrid:'Choose who approves each campaign. Driftwood reviews messages from campaigns without an override.' };
+export type ApprovalPolicy = { mode: ApprovalMode; campaign_reviewers: Record<string, Reviewer>; version: number; can_set_autopilot?: boolean };
+export const MODE_LABELS: Record<ApprovalMode,string> = { auto:'Auto approval', manual:'Manual approval', hybrid:'Hybrid approval', autopilot:'Autopilot' };
+export const MODE_DESCRIPTIONS: Record<ApprovalMode,string> = { auto:'Driftwood reviews and approves messages in our dashboard before they enter the sending queue.', manual:'Your workspace owners and admins review and approve messages in Pending before they enter the sending queue.', hybrid:'Choose who approves each campaign. Driftwood reviews messages from campaigns without an override.', autopilot:'Driftwood finds contacts, builds demos and prepares emails automatically, then reviews and approves them before they enter the sending queue. Only Driftwood can turn this on.' };
+/* Autopilot is staff-only to turn on, so it is offered to Driftwood and to a
+   workspace already on it (which can always switch back out), never otherwise.
+   Decide from the loaded policy so switching away in the form keeps it listed. */
+export function modeOptions(loaded: ApprovalPolicy): ApprovalMode[] {
+ const modes: ApprovalMode[] = ['auto','manual','hybrid'];
+ return loaded.mode === 'autopilot' || loaded.can_set_autopilot ? [...modes,'autopilot'] : modes;
+}
+/* Auto and Autopilot never wait on the customer's own team: Driftwood approves.
+   Every "is there anything for the customer to approve?" check asks this. */
+export function driftwoodApproves(mode: ApprovalMode): boolean {
+ return mode === 'auto' || mode === 'autopilot';
+}
 /* Save stays disabled until the draft differs from what was loaded. A campaign
    with no override and one set to Driftwood are the same policy, so campaigns
    compare by the reviewer they resolve to, not by whether the key is present. */
@@ -14,7 +26,7 @@ export function isPolicyDirty(saved: ApprovalPolicy, draft: ApprovalPolicy): boo
 }
 export function reviewerFor(policy: ApprovalPolicy, campaignId: string | null): Reviewer {
  if (policy.mode === 'manual') return 'customer';
- if (policy.mode === 'auto') return 'driftwood';
+ if (driftwoodApproves(policy.mode)) return 'driftwood';
  return campaignId ? policy.campaign_reviewers[campaignId] ?? 'driftwood' : 'driftwood';
 }
 export function parsePolicy(value: unknown): ApprovalPolicy {

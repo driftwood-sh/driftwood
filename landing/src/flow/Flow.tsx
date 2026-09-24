@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { EmailPreview } from "../EmailPreview";
 import { getPolicy } from "../approvals/api";
-import type { ApprovalPolicy } from "../approvals/model";
+import { driftwoodApproves, type ApprovalPolicy } from "../approvals/model";
 import { listAudiences } from "../audiences/api";
 import type { AudienceSummary } from "../audiences/model";
 import { useToast } from "../dashboard-shared";
@@ -91,7 +91,7 @@ export default function Flow() {
         /* Only a team that approves its own outreach has anything waiting
            on it; on auto approval the count is not asked for at all. It is
            the Demos badge's number, so the two never disagree. */
-        if (loaded.mode === "auto") return;
+        if (driftwoodApproves(loaded.mode)) return;
         demosNavCount().then(
           (count) => live && setWaiting(count),
           () => {},
@@ -258,15 +258,15 @@ export default function Flow() {
           title="Email"
           load={policy}
           value={(data) =>
-            data.mode === "auto"
+            driftwoodApproves(data.mode)
               ? "Checked by Driftwood"
               : waiting === null
                 ? "Your team approves"
                 : `${waiting.toLocaleString()} waiting for you`
           }
           sub={() => "One per person, with their demo"}
-          href={policy.status === "ready" && policy.data.mode !== "auto" ? "/dashboard/demos?view=approve-emails" : "/dashboard/inbox"}
-          action={policy.status === "ready" && policy.data.mode !== "auto" ? "Review emails" : "See emails"}
+          href={policy.status === "ready" && !driftwoodApproves(policy.data.mode) ? "/dashboard/demos?view=approve-emails" : "/dashboard/inbox"}
+          action={policy.status === "ready" && !driftwoodApproves(policy.data.mode) ? "Review emails" : "See emails"}
         />
         <Step
           n={4}
