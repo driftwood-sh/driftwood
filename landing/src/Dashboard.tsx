@@ -194,7 +194,7 @@ export default function Dashboard() {
     void (async () => {
       const fresh = (await identityBoot?.fresh) ?? null;
       if (cancelled) return;
-      // A 401 or network failure already cleared the identity cache.
+      // A 401 or 403 already cleared the identity cache.
       setAuth(
         fresh ? { status: "logged-in", user: fresh } : { status: "logged-out" },
       );

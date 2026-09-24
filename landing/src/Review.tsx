@@ -198,7 +198,7 @@ export default function Review() {
       if (cancelled) return;
       // Only approved users get the queue; everyone else goes back to the
       // dashboard, which handles login + the pending-approval state. A 401
-      // or network failure already cleared the identity cache.
+      // or 403 already cleared the identity cache.
       if (fresh?.is_approved) {
         setUser(fresh); // swap in place when it differs from the cache
       } else {

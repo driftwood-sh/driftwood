@@ -58,7 +58,7 @@ export default function WorkspacePage({
       if (cancelled) return;
       // Only approved users get the workspace; everyone else gets the
       // logged-out view, exactly as before the cache existed. A 401 or
-      // network failure already cleared the identity cache.
+      // 403 already cleared the identity cache.
       if (fresh?.is_approved) {
         setAuth({ status: "ready", user: fresh }); // swap in place when it differs from the cache
       } else {

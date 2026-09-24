@@ -1,6 +1,8 @@
 /* Imported with its extension so node --test can run this module directly
    (same convention as mock.ts). */
 import { activeMockMode } from "./mock-mode.ts";
+import { beginReconnecting } from "./connection-status.ts";
+import { backoffMs, retryAfterMs, sleep as defaultSleep, type Sleep } from "./fetch-retry.ts";
 
 /* One owner for the /auth/me flow shared by every dashboard page shell.
 
@@ -12,8 +14,15 @@ import { activeMockMode } from "./mock-mode.ts";
    against /auth/me in the background (`fresh`). Data endpoints are
    cookie-authed, so a stale cache can't leak anything — it only skips the
    spinner. When fresh disagrees with the cache the page swaps identity in
-   place; when fresh is null (401 / network failure) the cache is already
-   cleared and the caller redirects exactly as it did before.
+   place; when fresh is null (401 / 403) the cache is already cleared and
+   the caller shows the sign-in card.
+
+   Only 401 and 403 mean "signed out". Anything else (429 or 503 while Cloud
+   Run swaps the backend's single instance, a network error, a 5xx) means
+   "the backend is briefly unreachable": fresh keeps retrying with backoff,
+   honoring Retry-After, and marks the tab as reconnecting
+   (connection-status.ts) until it gets an answer. Before this, one 429
+   showed a signed-in user the sign-in card.
 
    Mock mode bypasses the cache entirely — no reads, no writes — so demo and
    real identities can never cross-contaminate; mock's fetch wrapper answers
@@ -39,8 +48,8 @@ export type Identity<U> = {
      unreadable, mock mode). Paint the real shell off it — but never trust
      it alone: `fresh` is already in flight. */
   cached: U | null;
-  /* The live /auth/me result. Resolves null on a 401 or network failure
-     (the cache is cleared by then); never rejects. */
+  /* The live /auth/me result. Resolves null on a 401 or 403 (the cache is
+     cleared by then); retries through anything else; never rejects. */
   fresh: Promise<U | null>;
 };
 
@@ -77,36 +86,57 @@ export function loadIdentity<U>(
     fetcher?: (input: string, init?: RequestInit) => Promise<Response>;
     storage?: StorageLike | null;
     mock?: boolean;
+    sleep?: Sleep;
   } = {},
 ): Identity<U> {
   const {
     fetcher = (input, init) => fetch(input, init),
     storage = safeStorage(),
     mock = activeMockMode() !== null,
+    sleep = defaultSleep,
   } = options;
   const cached = mock ? null : readCache<U>(storage);
   const fresh = (async (): Promise<U | null> => {
+    let done: (() => void) | null = null;
     try {
-      const res = await fetcher("/auth/me", { credentials: "include" });
-      if (!res.ok) {
-        if (!mock) storage?.removeItem(IDENTITY_KEY);
-        return null;
-      }
-      const user = (await res.json()) as U;
-      if (!mock) {
+      for (let attempt = 0; ; attempt++) {
+        let delay: number;
         try {
-          storage?.setItem(IDENTITY_KEY, JSON.stringify(user));
+          const res = await fetcher("/auth/me", { credentials: "include" });
+          if (isSignedOut(res.status)) {
+            if (!mock) storage?.removeItem(IDENTITY_KEY);
+            return null;
+          }
+          if (res.ok) {
+            const user = (await res.json()) as U;
+            if (!mock) {
+              try {
+                storage?.setItem(IDENTITY_KEY, JSON.stringify(user));
+              } catch {
+                // quota / private mode — same experience as having no cache
+              }
+            }
+            return user;
+          }
+          delay = retryAfterMs(res.headers.get("Retry-After")) ?? backoffMs(attempt);
         } catch {
-          // quota / private mode — same experience as having no cache
+          // Network error or an unreadable body: the backend is unreachable,
+          // not saying no. Keep the cache; the shell stays painted.
+          delay = backoffMs(attempt);
         }
+        done ??= beginReconnecting();
+        await sleep(delay);
       }
-      return user;
-    } catch {
-      if (!mock) storage?.removeItem(IDENTITY_KEY);
-      return null;
+    } finally {
+      done?.();
     }
   })();
   return { cached, fresh };
+}
+
+/* The only answers that mean "show the sign-in card". */
+export function isSignedOut(status: number): boolean {
+  return status === 401 || status === 403;
 }
 
 /* Called from every handleLogout before its redirect (loadIdentity already
