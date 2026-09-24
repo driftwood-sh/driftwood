@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ToastProvider } from "./dashboard/DashboardCommon";
 import { AdminPanelControls, ImpersonationBanner } from "./GodMode";
 import { CARD, fetchInWaves, prefetch, useToast } from "./dashboard-shared";
-import { clearIdentity, loadIdentity } from "./identity";
+import { checkIdentity, clearIdentity, loadIdentity, type IdentityResult } from "./identity";
+import IdentityUnavailable from "./components/IdentityUnavailable";
 import AppShell from "./dashboard/AppShell";
 import { EmailPreview } from "./EmailPreview";
 import { emailBodySummary } from "./email-preview";
@@ -190,31 +191,49 @@ export default function Review() {
   const [user, setUser] = useState<User | null>(
     identityBoot?.cached?.is_approved ? identityBoot.cached : null,
   );
+  const [unavailable, setUnavailable] = useState(false);
+
+  const apply = useCallback((result: IdentityResult<User>) => {
+    // Only approved users get the queue; everyone else goes back to the
+    // dashboard, which handles login + the pending-approval state. A 401
+    // or 403 already cleared the identity cache.
+    if (result.state === "user" && result.user.is_approved) {
+      setUser(result.user); // swap in place when it differs from the cache
+    } else if (result.state === "unavailable") {
+      setUnavailable(true); // a painted queue stays; otherwise the error card
+    } else {
+      if (result.state === "user") clearIdentity(); // logged in, but not approved
+      window.location.href = withMockMode("/dashboard");
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const fresh = (await identityBoot?.fresh) ?? null;
-      if (cancelled) return;
-      // Only approved users get the queue; everyone else goes back to the
-      // dashboard, which handles login + the pending-approval state. A 401
-      // or network failure already cleared the identity cache.
-      if (fresh?.is_approved) {
-        setUser(fresh); // swap in place when it differs from the cache
-      } else {
-        if (fresh) clearIdentity(); // logged in, but not approved
-        window.location.href = withMockMode("/dashboard");
-      }
+      const fresh = await identityBoot?.fresh;
+      if (cancelled || !fresh) return;
+      apply(fresh);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [apply]);
 
   return (
     <ToastProvider>
       <div className="grain relative flex min-h-[100dvh] flex-col overflow-x-clip">
-        {user ? <ReviewView user={user} /> : <LoadingView />}
+        {user ? (
+          <ReviewView user={user} />
+        ) : unavailable ? (
+          <IdentityUnavailable
+            onRetry={() => {
+              setUnavailable(false);
+              void checkIdentity<User>().then(apply);
+            }}
+          />
+        ) : (
+          <LoadingView />
+        )}
       </div>
     </ToastProvider>
   );

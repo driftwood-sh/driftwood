@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- entry file, never hot-refreshed */
 import './mock'
+import { installFetchRetry } from './fetch-retry'
+import ReconnectingNotice from './components/ReconnectingNotice'
 import { StrictMode, Suspense, lazy } from 'react'
 import { withMockMode } from './mock-mode'
 import { createRoot, hydrateRoot } from 'react-dom/client'
@@ -115,6 +117,11 @@ const page =
 
 const isLanding = !(path === '/og' || path === '/dashboard' || path.startsWith('/dashboard/'))
 
+// Dashboard GETs ride out the backend's short 429/503 windows (a Cloud Run
+// instance swap) instead of failing; see fetch-retry.ts. Installed after
+// mock.ts so it wraps the mock fetch too, and before any page chunk loads.
+if (!isLanding) installFetchRetry(window)
+
 // PostHog: landing pages only (dashboard is internal use — keep prospect
 // analytics clean). Ingestion rides the first-party /ingest proxy in
 // vercel.json, so ad-blockers don't eat events and the CSP stays 'self'.
@@ -134,7 +141,7 @@ const root = document.getElementById('root')!
 const tree = (
   <StrictMode>
     <Suspense fallback={null}>{page}</Suspense>
-    {isLanding && <Analytics />}
+    {isLanding ? <Analytics /> : <ReconnectingNotice />}
   </StrictMode>
 )
 
