@@ -9,7 +9,8 @@ import {
   type ManagedMailbox,
 } from "./managed-inboxes.ts";
 
-// noon UTC, so the short dates read the same in any time zone the tests run in
+// noon UTC, so the short dates read the same in every time zone from UTC-11
+// to UTC+11; at UTC+12 and beyond, noon UTC is already the next local day
 const NOW = Date.parse("2026-09-24T12:00:00Z");
 
 function box(overrides: Partial<ManagedMailbox>): ManagedMailbox {
