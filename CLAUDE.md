@@ -39,6 +39,31 @@ Promote a known-good prior deployment instead of guessing:
   to the backend; SPA catch-all to `index.html`). `/t/*` is the demo GIF and
   its player page, so it sits outside the site CSP and uses the backend's own.
 
+## Files come from Cloud Storage, not the backend
+
+The backend is one Cloud Run instance with 80 request slots, so file bytes
+never pass through it. A backend file URL (`/d/<slug>` media,
+`/api/v1/dashboard/demos/<id>/video`, asset `/content`, face-cloning
+`/content` and `/generations/<id>/<media>`, `/t/<token>.gif`) checks access,
+then answers 302 to a short-lived signed `https://storage.googleapis.com`
+URL. Only `/d/` HTML pages come from the backend itself. For the site:
+
+- Put the backend URL in `src` / `href` and let the browser follow the
+  redirect. Never store or print the signed URL: it expires, and whoever
+  holds it can read the file.
+- Keep `https://storage.googleapis.com` in the dashboard CSP `media-src`
+  (and `img-src`, which allows any `https:`). CSP checks the redirect
+  target.
+- A cross-origin redirect ignores `<a download>`. The backend signs the
+  filename into the URL instead.
+- Do not mount many media elements at once: load `src` only when a clip is
+  near the viewport (`DemoApprovals.tsx` `DemoVideo`). On 2026-09-21 the
+  demos page asked for 90 videos every 30 s and Cloud Run answered 474 of
+  those requests with 429.
+
+Full rule and audit: backend `docs/file-serving.md`. Reference route:
+backend `app/routers/demos.py` `video()`.
+
 ## Design language
 
 **Before any UI change (landing OR dashboard), read
